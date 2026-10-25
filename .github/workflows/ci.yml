@@ -1,0 +1,17 @@
+name: macOS build and simulated tests
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: "3.12"
+      - run: python3 scripts/run_tests.py
+      - run: zsh native/build.command
+      - run: codesign --verify --deep --strict "Robot Console.app"
