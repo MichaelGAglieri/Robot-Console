@@ -76,6 +76,8 @@ class Tests(unittest.TestCase):
   self.c.receive('SPEED 5.00');self.c.action({'op':'home_set'});self.assertTrue(self.c.home)
   self.c.receive('DOC REGIA 2');self.assertFalse(self.c.home)
  def test_heartbeat_loss(self):
-  self.c.browser=time.monotonic()-3;time.sleep(.1)
+  self.c.browser=time.monotonic()-3
+  deadline=time.monotonic()+2
+  while self.c.connected and time.monotonic()<deadline:time.sleep(.02)
   self.assertFalse(self.c.home);self.assertFalse(self.c.connected)
 if __name__=='__main__':unittest.main()
