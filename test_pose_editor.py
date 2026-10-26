@@ -27,7 +27,7 @@ class PoseEditorTests(SequenceFixture):
   self.assertEqual(self.c.sequence[0]['path'],base+[dict(axis=0,delta=2)])
   self.c.action(dict(op='play'))
   self.assertEqual(self.commands,[(0,10),(0,2),(0,-2),(0,-10)])
-  self.assertEqual(self.c.pos,[0]*5)
+  self.assertEqual(self.c.pos,[0]*6)
  def test_disabled_actions_and_all_disabled(self):
   a=[dict(axis=0,delta=10)];b=a+[dict(axis=1,delta=20)]
   self.c.sequence=[self.pose('A',a,'chiudi'),self.pose('B',b,'apri')]

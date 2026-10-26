@@ -1,0 +1,3 @@
+"NSCameraUsageDescription" = "Show local camera video and detect QR codes without sending images to external services.";
+"NSMicrophoneUsageDescription" = "Dictate a question in Robot Console chat.";
+"NSSpeechRecognitionUsageDescription" = "Transcribe questions on this Mac before you confirm sending them.";

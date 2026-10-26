@@ -2,18 +2,23 @@
 
 > **Work in progress.** This project is under active development. Hardware, software, interfaces and configuration can change. See the [roadmap](ROADMAP.md).
 
-A native macOS application for teaching and replaying poses on a five-axis Arduino Mega/RAMPS robot. It was developed during my D.O.C. robotics project and currently ships with that project's hardware configuration.
+A native macOS application for teaching, previewing and replaying arm poses on up to six joint channels. The physical D.O.C. reference robot has five DOF. It was developed during my D.O.C. robotics project and currently ships with that project's hardware configuration.
 
 ## Features
 
 - Preview mode without hardware and explicit USB connection to the robot.
-- Operator-defined HOME, editable joint limits and a 1–20°/s speed control with compatible firmware.
+- Italian / English selection and light, dark or automatic macOS appearance, with saved preferences.
+- Operator-defined HOME, editable joint limits and independent 1–20°/s joint speeds within the hardware profile limit.
+- Per-joint STOP with holding torque, confirmed ENABLE control on wired drivers, and an autosaved operator notes sidebar.
 - Pose recording, editing, reordering, deletion, temporary exclusion and one-step undo.
 - Per-pose gripper state, pauses, repeat cycles and return along recorded paths.
-- Firmware compilation and confirmed upload through Arduino CLI.
+- Bundled DOC 5 DOF presentation/Webots visualization, orbit/zoom/fit controls, local URDF import, joint exclusion, mapping, sign/offset calibration and TCP.
+- Position-only preview IK, approximate workcell boxes, bounded program blocks and CSV recordings.
+- Per-axis motor steps, microstepping, reducer ratio and direction; editable firmware sources, revisions, compilation and confirmed upload.
+- RViz visualization topics, ROS health, optional tool launchers, camera/QR and authenticated loopback sensor API.
 - Optional local Ollama chat, conversation journal, on-device Italian dictation and a read-only ROS 2 observer.
 
-**Supported in this release:** macOS 14 or later on Apple Silicon, Python 3, Mega 2560 and the documented RAMPS/A4988/DM542 configuration. Hardware profiles and a Windows application are not included. J6 is a disabled placeholder.
+**Supported in this release:** macOS 14 or later on Apple Silicon, Python 3, Mega 2560 and the documented RAMPS/A4988/DM542 configuration. The firmware backend remains Mega/RAMPS: J1/X A4988, J2/Y external DM542, J3/Z, J4/E0, J5/E1; The bundled visualization retains five arm DOF; J6 can be tested in preview, excluded, or configured for a separate external STEP/DIR driver. Other boards and Windows are not supported yet. See [Studio guide](docs/STUDIO.md) for exact limits.
 
 ## Install or build
 
@@ -27,7 +32,7 @@ To build the app locally, install Apple's Command Line Tools and run:
 zsh native/build.command
 ```
 
-This creates `Robot Console.app` in this directory without opening USB, starting Ollama or uploading firmware. Read [docs/USAGE.md](docs/USAGE.md) before connecting a robot. Current source version: **1.7.6**; included firmware protocol: **Regia 4**.
+This creates `Robot Console.app` in this directory without opening USB, starting Ollama or uploading firmware. Read [docs/STUDIO.md](docs/STUDIO.md) and [docs/USAGE.md](docs/USAGE.md) before connecting a robot. Current version: **2.0.0**; included firmware protocol: **Regia 4**.
 
 ## First use
 
@@ -36,7 +41,9 @@ This creates `Robot Console.app` in this directory without opening USB, starting
 3. Return to virtual HOME and replay. Only enabled poses perform their pause and gripper action.
 4. For physical use follow the [hardware guide](docs/HARDWARE.md), establish HOME and apply limits before moving. USB connection and a firmware acknowledgement do not measure the real arm's position.
 
-Pose editing saves data without moving the robot. New joint values extend the original recorded path in J1–J5 order; they are not collision-checked. Excluded poses can still be crossed by the recorded paths of later enabled poses.
+Physical movements remain sequential, one joint at a time. Clearing a joint checkbox can release winding current on wired A4988 drivers after confirmation; support a loaded axis before releasing it. J2/DM542 ENA is unwired in the reference configuration, so software exclusion cannot remove its holding torque. Per-joint ENABLE control requires the updated bundled firmware; updating the app never uploads it automatically.
+
+Pose editing saves data without moving the robot. New joint values extend the original recorded path in J1–J6 order; they are not collision-checked. Excluded poses can still be crossed by the recorded paths of later enabled poses.
 
 ## Tests
 
@@ -44,7 +51,7 @@ Pose editing saves data without moving the robot. New joint values extend the or
 python3 scripts/run_tests.py
 ```
 
-Tests isolate user data and use preview, mocks or pseudo-terminals. They do not require a connected Mega and do not establish mechanical performance. The macOS build workflow also compiles the Swift application.
+Tests isolate user data and use preview, mocks or pseudo-terminals. They do not require a connected Mega and do not establish mechanical performance. Optional integration checks: `python3 -m unittest test_local_api` (loopback socket), `python3 scripts/verify_firmware_workspace.py` (installed Arduino dependencies, compilation only), and `python scripts/verify_ros_observer.py` (prepared ROS environment). The macOS build workflow also compiles the Swift application.
 
 ## D.O.C. and ROS 2
 

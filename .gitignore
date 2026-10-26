@@ -23,6 +23,15 @@ limiti.tmp
 *.log
 controller.lock
 ia_settings.json
+axes_enabled.json
+axes_enabled.tmp
+axis_speeds.json
+axis_speeds.tmp
+firmware_workspace/
+studio/
+tools/
+ros_state.json
+ros_state.tmp
 output/
 # Model weights and compiled applications
 *.onnx
@@ -34,3 +43,6 @@ output/
 # Assets fetched from the pinned upstream manifest
 webots_sim/protos/vendor/webots/projects/
 webots_sim/worlds/.*.wbproj
+
+# Internal development audit; not part of the public release
+docs/DEVELOPMENT_2_0.md
