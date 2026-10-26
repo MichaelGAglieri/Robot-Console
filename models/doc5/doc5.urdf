@@ -1,0 +1,624 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="DOC · modello illustrativo 5 DOF">
+  <link name="world" />
+  <link name="base_link" />
+  <link name="base_link_inertia">
+    <visual>
+      <origin xyz="0.0 0.0 0.0" rpy="0.0 0.0 3.141592653589793" />
+      <geometry>
+        <mesh filename="meshes/mesh-00-00.stl" scale="1.0 1.0 1.0" />
+      </geometry>
+      <material name="doc_mesh-00-00.stl">
+        <color rgba="0.4 0.88 0.012 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0.0 0.0 0.0" rpy="0.0 0.0 3.141592653589793" />
+      <geometry>
+        <mesh filename="meshes/mesh-00-01.stl" scale="1.0 1.0 1.0" />
+      </geometry>
+      <material name="doc_mesh-00-01.stl">
+        <color rgba="0.018 0.022 0.018 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="shoulder_link">
+    <visual>
+      <origin xyz="0.0 0.0 0.0" rpy="0.0 0.0 3.141592653589793" />
+      <geometry>
+        <mesh filename="meshes/mesh-01-00.stl" scale="1.0 1.0 1.0" />
+      </geometry>
+      <material name="doc_mesh-01-00.stl">
+        <color rgba="0.018 0.022 0.018 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0.0 0.0 0.0" rpy="0.0 0.0 3.141592653589793" />
+      <geometry>
+        <mesh filename="meshes/mesh-01-01.stl" scale="1.0 1.0 1.0" />
+      </geometry>
+      <material name="doc_mesh-01-01.stl">
+        <color rgba="0.018 0.022 0.018 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0.0 0.0 0.0" rpy="0.0 0.0 3.141592653589793" />
+      <geometry>
+        <mesh filename="meshes/mesh-01-02.stl" scale="1.0 1.0 1.0" />
+      </geometry>
+      <material name="doc_mesh-01-02.stl">
+        <color rgba="0.018 0.022 0.018 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="upper_arm_link">
+    <visual>
+      <origin xyz="0.0 0.0 0.12" rpy="1.5707963267948966 0.0 -1.5707963267948966" />
+      <geometry>
+        <mesh filename="meshes/mesh-02-00.stl" scale="1.0 1.0 1.0" />
+      </geometry>
+      <material name="doc_mesh-02-00.stl">
+        <color rgba="0.4 0.88 0.012 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0.0 0.0 0.12" rpy="1.5707963267948966 0.0 -1.5707963267948966" />
+      <geometry>
+        <mesh filename="meshes/mesh-02-01.stl" scale="1.0 1.0 1.0" />
+      </geometry>
+      <material name="doc_mesh-02-01.stl">
+        <color rgba="0.018 0.022 0.018 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0.0 0.0 0.12" rpy="1.5707963267948966 0.0 -1.5707963267948966" />
+      <geometry>
+        <mesh filename="meshes/mesh-02-02.stl" scale="1.0 1.0 1.0" />
+      </geometry>
+      <material name="doc_mesh-02-02.stl">
+        <color rgba="0.018 0.022 0.018 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0.0 0.0 0.12" rpy="1.5707963267948966 0.0 -1.5707963267948966" />
+      <geometry>
+        <mesh filename="meshes/mesh-02-03.stl" scale="1.0 1.0 1.0" />
+      </geometry>
+      <material name="doc_mesh-02-03.stl">
+        <color rgba="0.018 0.022 0.018 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0.0 0.0 0.12" rpy="1.5707963267948966 0.0 -1.5707963267948966" />
+      <geometry>
+        <mesh filename="meshes/mesh-02-04.stl" scale="1.0 1.0 1.0" />
+      </geometry>
+      <material name="doc_mesh-02-04.stl">
+        <color rgba="0.018 0.022 0.018 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0.0 0.0 0.12" rpy="1.5707963267948966 0.0 -1.5707963267948966" />
+      <geometry>
+        <mesh filename="meshes/mesh-02-05.stl" scale="1.0 1.0 1.0" />
+      </geometry>
+      <material name="doc_mesh-02-05.stl">
+        <color rgba="0.4 0.88 0.012 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0.0 0.0 0.12" rpy="1.5707963267948966 0.0 -1.5707963267948966" />
+      <geometry>
+        <mesh filename="meshes/mesh-02-06.stl" scale="1.0 1.0 1.0" />
+      </geometry>
+      <material name="doc_mesh-02-06.stl">
+        <color rgba="0.018 0.022 0.018 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0.0 0.0 0.12" rpy="1.5707963267948966 0.0 -1.5707963267948966" />
+      <geometry>
+        <mesh filename="meshes/mesh-02-07.stl" scale="1.0 1.0 1.0" />
+      </geometry>
+      <material name="doc_mesh-02-07.stl">
+        <color rgba="0.018 0.022 0.018 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0.0 0.0 0.12" rpy="1.5707963267948966 0.0 -1.5707963267948966" />
+      <geometry>
+        <mesh filename="meshes/mesh-02-08.stl" scale="1.0 1.0 1.0" />
+      </geometry>
+      <material name="doc_mesh-02-08.stl">
+        <color rgba="0.018 0.022 0.018 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="forearm_link">
+    <visual>
+      <origin xyz="0.0 0.0 0.027" rpy="1.5707963267948966 0.0 -1.5707963267948966" />
+      <geometry>
+        <mesh filename="meshes/mesh-03-00.stl" scale="1.0 1.0 1.0" />
+      </geometry>
+      <material name="doc_mesh-03-00.stl">
+        <color rgba="0.018 0.022 0.018 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0.0 0.0 0.027" rpy="1.5707963267948966 0.0 -1.5707963267948966" />
+      <geometry>
+        <mesh filename="meshes/mesh-03-01.stl" scale="1.0 1.0 1.0" />
+      </geometry>
+      <material name="doc_mesh-03-01.stl">
+        <color rgba="0.4 0.88 0.012 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0.0 0.0 0.027" rpy="1.5707963267948966 0.0 -1.5707963267948966" />
+      <geometry>
+        <mesh filename="meshes/mesh-03-02.stl" scale="1.0 1.0 1.0" />
+      </geometry>
+      <material name="doc_mesh-03-02.stl">
+        <color rgba="0.4 0.88 0.012 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0.0 0.0 0.027" rpy="1.5707963267948966 0.0 -1.5707963267948966" />
+      <geometry>
+        <mesh filename="meshes/mesh-03-03.stl" scale="1.0 1.0 1.0" />
+      </geometry>
+      <material name="doc_mesh-03-03.stl">
+        <color rgba="0.4 0.88 0.012 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0.0 0.0 0.027" rpy="1.5707963267948966 0.0 -1.5707963267948966" />
+      <geometry>
+        <mesh filename="meshes/mesh-03-04.stl" scale="1.0 1.0 1.0" />
+      </geometry>
+      <material name="doc_mesh-03-04.stl">
+        <color rgba="0.018 0.022 0.018 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0.0 0.0 0.027" rpy="1.5707963267948966 0.0 -1.5707963267948966" />
+      <geometry>
+        <mesh filename="meshes/mesh-03-05.stl" scale="1.0 1.0 1.0" />
+      </geometry>
+      <material name="doc_mesh-03-05.stl">
+        <color rgba="0.018 0.022 0.018 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0.0 0.0 0.027" rpy="1.5707963267948966 0.0 -1.5707963267948966" />
+      <geometry>
+        <mesh filename="meshes/mesh-03-06.stl" scale="1.0 1.0 1.0" />
+      </geometry>
+      <material name="doc_mesh-03-06.stl">
+        <color rgba="0.018 0.022 0.018 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="wrist_1_link">
+    <visual>
+      <origin xyz="0.0 0.0 -0.104" rpy="1.5707963267948966 0.0 0.0" />
+      <geometry>
+        <mesh filename="meshes/mesh-04-00.stl" scale="1.0 1.0 1.0" />
+      </geometry>
+      <material name="doc_mesh-04-00.stl">
+        <color rgba="0.018 0.022 0.018 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0.0 0.0 -0.104" rpy="1.5707963267948966 0.0 0.0" />
+      <geometry>
+        <mesh filename="meshes/mesh-04-01.stl" scale="1.0 1.0 1.0" />
+      </geometry>
+      <material name="doc_mesh-04-01.stl">
+        <color rgba="0.018 0.022 0.018 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0.0 0.0 -0.104" rpy="1.5707963267948966 0.0 0.0" />
+      <geometry>
+        <mesh filename="meshes/mesh-04-02.stl" scale="1.0 1.0 1.0" />
+      </geometry>
+      <material name="doc_mesh-04-02.stl">
+        <color rgba="0.018 0.022 0.018 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="wrist_2_link">
+    <visual>
+      <origin xyz="0.0 0.0 -0.08535" rpy="0.0 0.0 0.0" />
+      <geometry>
+        <mesh filename="meshes/mesh-05-00.stl" scale="1.0 1.0 1.0" />
+      </geometry>
+      <material name="doc_mesh-05-00.stl">
+        <color rgba="0.018 0.022 0.018 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0.0 0.0 -0.08535" rpy="0.0 0.0 0.0" />
+      <geometry>
+        <mesh filename="meshes/mesh-05-01.stl" scale="1.0 1.0 1.0" />
+      </geometry>
+      <material name="doc_mesh-05-01.stl">
+        <color rgba="0.018 0.022 0.018 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0.0 0.0 -0.08535" rpy="0.0 0.0 0.0" />
+      <geometry>
+        <mesh filename="meshes/mesh-05-02.stl" scale="1.0 1.0 1.0" />
+      </geometry>
+      <material name="doc_mesh-05-02.stl">
+        <color rgba="0.018 0.022 0.018 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="base_joint" type="fixed">
+    <origin rpy="0 0 0" xyz="0 0 0" />
+    <parent link="world" />
+    <child link="base_link" />
+  </joint>
+  <joint name="base_link-base_link_inertia" type="fixed">
+    <parent link="base_link" />
+    <child link="base_link_inertia" />
+    <origin rpy="0 0 3.141592653589793" xyz="0 0 0" />
+  </joint>
+  <joint name="joint_1" type="revolute">
+    <parent link="base_link_inertia" />
+    <child link="shoulder_link" />
+    <origin rpy="0 0 0" xyz="0 0 0.15185" />
+    <axis xyz="0 0 1" />
+    <limit effort="54.0" lower="-6.283185307179586" upper="6.283185307179586" velocity="3.141592653589793" />
+    <dynamics damping="0" friction="0" />
+  </joint>
+  <joint name="joint_2" type="revolute">
+    <parent link="shoulder_link" />
+    <child link="upper_arm_link" />
+    <origin rpy="1.570796327 0 0" xyz="0 0 0" />
+    <axis xyz="0 0 1" />
+    <limit effort="54.0" lower="-6.283185307179586" upper="6.283185307179586" velocity="3.141592653589793" />
+    <dynamics damping="0" friction="0" />
+  </joint>
+  <joint name="joint_3" type="revolute">
+    <parent link="upper_arm_link" />
+    <child link="forearm_link" />
+    <origin rpy="0 0 0" xyz="-0.24355 0 0" />
+    <axis xyz="0 0 1" />
+    <limit effort="28.0" lower="-3.141592653589793" upper="3.141592653589793" velocity="3.141592653589793" />
+    <dynamics damping="0" friction="0" />
+  </joint>
+  <joint name="joint_4" type="revolute">
+    <parent link="forearm_link" />
+    <child link="wrist_1_link" />
+    <origin rpy="0 0 0" xyz="-0.2132 0 0.13105" />
+    <axis xyz="0 0 1" />
+    <limit effort="9.0" lower="-6.283185307179586" upper="6.283185307179586" velocity="6.283185307179586" />
+    <dynamics damping="0" friction="0" />
+  </joint>
+  <joint name="joint_5" type="revolute">
+    <parent link="wrist_1_link" />
+    <child link="wrist_2_link" />
+    <origin rpy="1.570796327 0 0" xyz="0 -0.08535 -1.750557762378351e-11" />
+    <axis xyz="0 0 1" />
+    <limit effort="9.0" lower="-6.283185307179586" upper="6.283185307179586" velocity="6.283185307179586" />
+    <dynamics damping="0" friction="0" />
+  </joint>
+  <link name="base" />
+  <joint name="base_link-base_fixed_joint" type="fixed">
+    <origin rpy="0 0 3.141592653589793" xyz="0 0 0" />
+    <parent link="base_link" />
+    <child link="base" />
+  </joint>
+  <link name="tool0" />
+  <material name="pinza">
+    <color rgba="0.16 0.16 0.18 1.0" />
+  </material>
+  <material name="gomma">
+    <color rgba="0.05 0.05 0.05 1.0" />
+  </material>
+  <link name="doc_lab_gripper">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/mesh-06-00.stl" scale="1 1 1" />
+      </geometry>
+      <material name="doc_mesh-06-00.stl">
+        <color rgba="0.4 0.88 0.012 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/mesh-07-00.stl" scale="1 1 1" />
+      </geometry>
+      <material name="doc_mesh-07-00.stl">
+        <color rgba="0.018 0.022 0.018 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/mesh-08-00.stl" scale="1 1 1" />
+      </geometry>
+      <material name="doc_mesh-08-00.stl">
+        <color rgba="0.018 0.022 0.018 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/mesh-09-00.stl" scale="1 1 1" />
+      </geometry>
+      <material name="doc_mesh-09-00.stl">
+        <color rgba="0.4 0.88 0.012 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/mesh-10-00.stl" scale="1 1 1" />
+      </geometry>
+      <material name="doc_mesh-10-00.stl">
+        <color rgba="0.55 0.56 0.57 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/mesh-11-00.stl" scale="1 1 1" />
+      </geometry>
+      <material name="doc_mesh-11-00.stl">
+        <color rgba="0.55 0.56 0.57 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/mesh-12-00.stl" scale="1 1 1" />
+      </geometry>
+      <material name="doc_mesh-12-00.stl">
+        <color rgba="0.55 0.56 0.57 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/mesh-13-00.stl" scale="1 1 1" />
+      </geometry>
+      <material name="doc_mesh-13-00.stl">
+        <color rgba="0.55 0.56 0.57 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/mesh-14-00.stl" scale="1 1 1" />
+      </geometry>
+      <material name="doc_mesh-14-00.stl">
+        <color rgba="0.55 0.56 0.57 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/mesh-15-00.stl" scale="1 1 1" />
+      </geometry>
+      <material name="doc_mesh-15-00.stl">
+        <color rgba="0.55 0.56 0.57 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="lab_finger_1">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/mesh-16-00.stl" scale="1 1 1" />
+      </geometry>
+      <material name="doc_mesh-16-00.stl">
+        <color rgba="0.018 0.022 0.018 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/mesh-17-00.stl" scale="1 1 1" />
+      </geometry>
+      <material name="doc_mesh-17-00.stl">
+        <color rgba="0.018 0.022 0.018 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/mesh-18-00.stl" scale="1 1 1" />
+      </geometry>
+      <material name="doc_mesh-18-00.stl">
+        <color rgba="0.4 0.88 0.012 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/mesh-19-00.stl" scale="1 1 1" />
+      </geometry>
+      <material name="doc_mesh-19-00.stl">
+        <color rgba="0.018 0.022 0.018 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/mesh-20-00.stl" scale="1 1 1" />
+      </geometry>
+      <material name="doc_mesh-20-00.stl">
+        <color rgba="0.018 0.022 0.018 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/mesh-21-00.stl" scale="1 1 1" />
+      </geometry>
+      <material name="doc_mesh-21-00.stl">
+        <color rgba="0.018 0.022 0.018 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="lab_finger_2">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/mesh-22-00.stl" scale="1 1 1" />
+      </geometry>
+      <material name="doc_mesh-22-00.stl">
+        <color rgba="0.018 0.022 0.018 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/mesh-23-00.stl" scale="1 1 1" />
+      </geometry>
+      <material name="doc_mesh-23-00.stl">
+        <color rgba="0.018 0.022 0.018 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/mesh-24-00.stl" scale="1 1 1" />
+      </geometry>
+      <material name="doc_mesh-24-00.stl">
+        <color rgba="0.4 0.88 0.012 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/mesh-25-00.stl" scale="1 1 1" />
+      </geometry>
+      <material name="doc_mesh-25-00.stl">
+        <color rgba="0.018 0.022 0.018 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/mesh-26-00.stl" scale="1 1 1" />
+      </geometry>
+      <material name="doc_mesh-26-00.stl">
+        <color rgba="0.018 0.022 0.018 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/mesh-27-00.stl" scale="1 1 1" />
+      </geometry>
+      <material name="doc_mesh-27-00.stl">
+        <color rgba="0.018 0.022 0.018 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="lab_finger_3">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/mesh-28-00.stl" scale="1 1 1" />
+      </geometry>
+      <material name="doc_mesh-28-00.stl">
+        <color rgba="0.018 0.022 0.018 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/mesh-29-00.stl" scale="1 1 1" />
+      </geometry>
+      <material name="doc_mesh-29-00.stl">
+        <color rgba="0.018 0.022 0.018 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/mesh-30-00.stl" scale="1 1 1" />
+      </geometry>
+      <material name="doc_mesh-30-00.stl">
+        <color rgba="0.4 0.88 0.012 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/mesh-31-00.stl" scale="1 1 1" />
+      </geometry>
+      <material name="doc_mesh-31-00.stl">
+        <color rgba="0.018 0.022 0.018 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/mesh-32-00.stl" scale="1 1 1" />
+      </geometry>
+      <material name="doc_mesh-32-00.stl">
+        <color rgba="0.018 0.022 0.018 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/mesh-33-00.stl" scale="1 1 1" />
+      </geometry>
+      <material name="doc_mesh-33-00.stl">
+        <color rgba="0.018 0.022 0.018 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="tcp_link" />
+  <joint name="wrist_2-tool0" type="fixed">
+    <parent link="wrist_2_link" />
+    <child link="tool0" />
+    <origin xyz="0 0.05044771730899811 0" rpy="-1.5707963267948966 0 0" />
+  </joint>
+  <joint name="lab_gripper_mount" type="fixed">
+    <parent link="wrist_2_link" />
+    <child link="doc_lab_gripper" />
+    <origin xyz="0 0.05044771730899811 0" rpy="-1.5707963267948966 0 0" />
+  </joint>
+  <joint name="lab_finger_1_joint" type="prismatic">
+    <parent link="doc_lab_gripper" />
+    <child link="lab_finger_1" />
+    <origin xyz="0.054 0.0 0.14696" rpy="0 0 0.0" />
+    <axis xyz="-1 0 0" />
+    <limit lower="0" upper=".033" effort="20" velocity=".08" />
+    <mimic joint="joint_5" multiplier="0" offset="0" />
+  </joint>
+  <joint name="lab_finger_2_joint" type="prismatic">
+    <parent link="doc_lab_gripper" />
+    <child link="lab_finger_2" />
+    <origin xyz="-0.027 0.046765372 0.14696" rpy="0 0 2.094395102" />
+    <axis xyz="-1 0 0" />
+    <limit lower="0" upper=".033" effort="20" velocity=".08" />
+    <mimic joint="joint_5" multiplier="0" offset="0" />
+  </joint>
+  <joint name="lab_finger_3_joint" type="prismatic">
+    <parent link="doc_lab_gripper" />
+    <child link="lab_finger_3" />
+    <origin xyz="-0.027 -0.046765372 0.14696" rpy="0 0 4.188790205" />
+    <axis xyz="-1 0 0" />
+    <limit lower="0" upper=".033" effort="20" velocity=".08" />
+    <mimic joint="joint_5" multiplier="0" offset="0" />
+  </joint>
+  <joint name="tcp_fisso" type="fixed">
+    <parent link="tool0" />
+    <child link="tcp_link" />
+    <origin xyz="0 0 0.17696" rpy="0 0 0" />
+  </joint>
+  <robot_console reference="doc5-presentation" tip="tcp_link" gripper_joints="lab_finger_1_joint lab_finger_2_joint lab_finger_3_joint" gripper_travel="0.012" nominal_home="-1.5708 -1.5708 1.5708 -1.5708 -1.5708" />
+</robot>

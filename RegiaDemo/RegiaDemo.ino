@@ -18,19 +18,25 @@
 #endif
 #include "PinzaTimer1.h"
 
-const byte AXES = 5;
-const byte STEP_PINS[AXES] = {54, 60, 46, 26, 36};
-const byte DIR_PINS[AXES] = {55, 61, 48, 28, 34};
-const byte ENABLE_PINS[AXES] = {38, 56, 62, 24, 30}; // Solo A4988: LOW=ON
-const char * const SLOT[AXES] = {"X", "Y", "Z", "E0", "E1"};
+const byte AXES = 6;
+// J6 uses a separate external driver. No pin is driven until configured explicitly.
+const bool J6_CONFIGURED = false;
+const byte J6_STEP_PIN = 255;
+const byte J6_DIR_PIN = 255;
+const byte J6_ENABLE_PIN = 255; // 255: ENA unmanaged, holding torque may remain.
+const bool J6_DM542 = true;
+const byte STEP_PINS[AXES] = {54, 60, 46, 26, 36, J6_STEP_PIN};
+const byte DIR_PINS[AXES] = {55, 61, 48, 28, 34, J6_DIR_PIN};
+const byte ENABLE_PINS[AXES] = {38, 56, 62, 24, 30, J6_ENABLE_PIN}; // Solo A4988: LOW=ON
+const char * const SLOT[AXES] = {"X", "Y", "Z", "E0", "E1", "EXT"};
 
 // CONFIGURAZIONE: ordine j1, j2, j3, j4, j5.
 // Impulsi per giro MOTORE: A4988 200 passi x 1/8 = 1600.
 // J2 DollaTek DM542: ON 1,3,7,8; OFF 2,4,5,6, dichiarati dall'utente.
 // Tabella di riferimento: SW5/6 OFF, SW7/8 ON = 1600 impulsi/giro.
-const uint16_t PULSES_PER_MOTOR_REV[AXES] = {1600, 1600, 1600, 1600, 1600};
-const float REDUCTION[AXES] = {38.4f, 38.4f, 38.4f, 38.4f, 38.4f};
-const bool INVERT_DIRECTION[AXES] = {false, false, false, false, false};
+const uint16_t PULSES_PER_MOTOR_REV[AXES] = {1600, 1600, 1600, 1600, 1600, 1600};
+const float REDUCTION[AXES] = {38.4f, 38.4f, 38.4f, 38.4f, 38.4f, 38.4f};
+const bool INVERT_DIRECTION[AXES] = {false, false, false, false, false, false};
 const byte DM542_AXIS = 1; // j2; STEP D60, DIR D61; ENA esterno non gestito.
 // false: PUL+ riceve STEP, PUL- a GND (segnale attivo HIGH).
 // true: PUL+ a +5 V, PUL- riceve STEP (segnale attivo LOW).
@@ -65,9 +71,37 @@ DM542Stepper motorY;
 AccelStepper motorZ(AccelStepper::DRIVER, 46, 48);
 AccelStepper motorE0(AccelStepper::DRIVER, 26, 28);
 AccelStepper motorE1(AccelStepper::DRIVER, 36, 34);
-AccelStepper * const motors[AXES] = {&motorX, &motorY, &motorZ, &motorE0, &motorE1};
+class ExternalJ6Stepper : public AccelStepper {
+ public:
+  ExternalJ6Stepper() : AccelStepper(AccelStepper::DRIVER,J6_STEP_PIN,J6_DIR_PIN,0,0,false) {}
+ protected:
+  void step1(long step) override {
+    (void)step;
+    digitalWrite(J6_DIR_PIN,(_direction != INVERT_DIRECTION[5]) ? HIGH : LOW);
+    delayMicroseconds(10);digitalWrite(J6_STEP_PIN,HIGH);
+    delayMicroseconds(10);digitalWrite(J6_STEP_PIN,LOW);delayMicroseconds(10);
+  }
+};
+ExternalJ6Stepper motorJ6;
+AccelStepper * const motors[AXES] = {&motorX, &motorY, &motorZ, &motorE0, &motorE1, &motorJ6};
 long pulsesPerOutputRev[AXES];
-bool enabled[AXES] = {false, false, false, false, false};
+bool enabled[AXES] = {false, false, false, false, false, false};
+// Command permission is separate from electrical ENABLE. ARM respects this mask.
+bool axisAllowed[AXES] = {true, true, true, true, true, true};
+bool managedEnable(byte i) {
+  return i!=DM542_AXIS && (i!=5 || (J6_CONFIGURED && !J6_DM542)) && ENABLE_PINS[i]!=255;
+}
+void printDrives() {
+  Serial.print(F("DRIVES "));
+  for(byte i=0;i<AXES;++i) Serial.print(managedEnable(i) ? (enabled[i] ? '1' : '0') : '?');
+  Serial.println();
+}
+void printAxisFeatures() {
+  Serial.println(F("FEATURES AXIS_ENABLE"));
+  Serial.print(F("DRIVE_CAPS "));
+  for(byte i=0;i<AXES;++i) Serial.print(managedEnable(i) ? '1' : '0');
+  Serial.println(); printDrives();
+}
 int8_t movingAxis = -1;
 char commandBuffer[40];
 byte commandLength = 0;
@@ -89,7 +123,8 @@ void printAxis(byte i) {
 void stopAll() {
   stopServoSignal();
   for (byte i=0; i<AXES; ++i) {
-    digitalWrite(ENABLE_PINS[i], HIGH);
+    if(i==5 && !J6_CONFIGURED) continue;
+    if(ENABLE_PINS[i]!=255) digitalWrite(ENABLE_PINS[i], HIGH);
     // Azzera velocita' e obiettivo software, senza definire uno zero fisico.
     motors[i]->setCurrentPosition(0);
     digitalWrite(STEP_PINS[i], (i==DM542_AXIS && DM542_INVERT_STEP) ? HIGH : LOW);
@@ -170,6 +205,7 @@ void moveAxis(byte axis, int32_t centidegrees) {
     Serial.println(F("Occupato: comando scartato. Attendi oppure x."));
     return;
   }
+  if(!axisAllowed[axis]) {Serial.println(F("ERROR AXIS DISABLED"));return;}
   const long pulses=angleToPulses(axis, centidegrees);
   if (!pulses) {
     Serial.println(F("Spostamento nullo dopo arrotondamento: nessun impulso."));
@@ -178,7 +214,7 @@ void moveAxis(byte axis, int32_t centidegrees) {
   // Conteggio locale del movimento: evita overflow dopo molti comandi.
   motors[axis]->setCurrentPosition(0);
   // Lo slot Y A4988 resta disabilitato: J2 usa il DM542 esterno.
-  if (axis!=DM542_AXIS) {
+  if (managedEnable(axis)) {
     digitalWrite(ENABLE_PINS[axis], LOW);
     enabled[axis]=true;
   }
@@ -195,8 +231,29 @@ void executeCommand(char *text) {
   int n=strlen(text);
   while (n && isSpace(text[n-1])) text[--n]=0;
   if (!n) return;
-  if (!strcmp(text,"hello")) { Serial.println(F("DOC REGIA 4")); return; }
+  if (!strcmp(text,"hello")) { Serial.println(F("DOC REGIA 4")); Serial.print(F("CAPS ")); Serial.println(J6_CONFIGURED ? 6 : 5); printAxisFeatures(); return; }
   if (!linked) { Serial.println(F("ERROR HEARTBEAT")); return; }
+  // Atomic per-axis exclusion: cancel the current trajectory before releasing torque.
+  // Other drivers keep their holding state; J2/DM542 ENA is never claimed controlled.
+  if (!strncmp(text,"off ",4)) {
+    if(strlen(text)!=5 || text[4]<'1' || text[4]>'6') {Serial.println(F("ERROR AXIS"));return;}
+    byte axis=text[4]-'1';
+    if(movingAxis>=0) holdStop();
+    axisAllowed[axis]=false;
+    if(managedEnable(axis)) {digitalWrite(ENABLE_PINS[axis],HIGH);enabled[axis]=false;}
+    printDrives();Serial.print(F("AXIS_OFF "));Serial.println(axis+1);return;
+  }
+  if (!strncmp(text,"mask ",5)) {
+    if(movingAxis>=0) {Serial.println(F("ERROR BUSY"));return;}
+    if(strlen(text)!=5+AXES) {Serial.println(F("ERROR MASK"));return;}
+    for(byte i=0;i<AXES;++i) if(text[5+i]!='0' && text[5+i]!='1') {Serial.println(F("ERROR MASK"));return;}
+    for(byte i=0;i<AXES;++i) {
+      axisAllowed[i]=text[5+i]=='1';
+      // Including an axis never energizes it: the operator must confirm HOME/ARM.
+      if(!axisAllowed[i] && managedEnable(i)) {digitalWrite(ENABLE_PINS[i],HIGH);enabled[i]=false;}
+    }
+    printDrives();return;
+  }
   if (!strncmp(text,"speed ",6)) {
     if (movingAxis>=0) {Serial.println(F("ERROR BUSY"));return;}
     int32_t value;
@@ -210,10 +267,10 @@ void executeCommand(char *text) {
   }
   if (!strcmp(text,"arm")) {
     if(movingAxis>=0) { Serial.println(F("ERROR BUSY")); return; }
-    for(byte i=0;i<AXES;++i) if(i!=DM542_AXIS) {
-      digitalWrite(ENABLE_PINS[i],LOW);enabled[i]=true;
+    for(byte i=0;i<AXES;++i) if(managedEnable(i)) {
+      digitalWrite(ENABLE_PINS[i],axisAllowed[i] ? LOW : HIGH);enabled[i]=axisAllowed[i];
     }
-    Serial.println(F("ARMED"));return;
+    printDrives();Serial.println(F("ARMED"));return;
   }
   if (!strcmp(text,"p")) { printStatus(); return; }
   if (!strcmp(text,"h") || !strcmp(text,"?")) { printHelp(); return; }
@@ -225,11 +282,12 @@ void executeCommand(char *text) {
     requestServoPosition(!strcmp(text,"apri") ? SERVO_OPEN_US : SERVO_CLOSED_US);
     return;
   }
-  if (n<4 || text[0]!='j' || text[1]<'1' || text[1]>'5' || !isSpace(text[2])) {
-    Serial.println(F("Formato: j1 180 ... j5 -180; apri; chiudi; h=aiuto."));
+  if (n<4 || text[0]!='j' || text[1]<'1' || text[1]>'6' || !isSpace(text[2])) {
+    Serial.println(F("Formato: j1 180 ... j6 -180; apri; chiudi; h=aiuto."));
     return;
   }
   const byte axis=text[1]-'1';
+  if(axis==5 && !J6_CONFIGURED){Serial.println(F("ERROR J6 NOT CONFIGURED"));return;}
   const char *angle=text+2;
   while (isSpace(*angle)) ++angle;
   int32_t degrees;
@@ -269,7 +327,9 @@ void readSerialCommand() {
 }
 void setup() {
   for (byte i=0; i<AXES; ++i) {
-    digitalWrite(ENABLE_PINS[i],HIGH); pinMode(ENABLE_PINS[i],OUTPUT);
+    pulsesPerOutputRev[i]=lroundf(PULSES_PER_MOTOR_REV[i]*REDUCTION[i]);
+    if(i==5 && !J6_CONFIGURED) continue;
+    if(ENABLE_PINS[i]!=255){digitalWrite(ENABLE_PINS[i],HIGH); pinMode(ENABLE_PINS[i],OUTPUT);}
     digitalWrite(STEP_PINS[i], (i==DM542_AXIS && DM542_INVERT_STEP) ? HIGH : LOW);
     digitalWrite(DIR_PINS[i],LOW);
     pinMode(STEP_PINS[i],OUTPUT); pinMode(DIR_PINS[i],OUTPUT);
@@ -287,7 +347,7 @@ void setup() {
     digitalWrite(offPins[i],LOW); pinMode(offPins[i],OUTPUT);
   }
   Serial.begin(115200);
-  Serial.println(F("DOC REGIA 4"));
+  Serial.println(F("DOC REGIA 4")); Serial.print(F("CAPS ")); Serial.println(J6_CONFIGURED ? 6 : 5); printAxisFeatures();
   printHelp();
 }
 void loop() {

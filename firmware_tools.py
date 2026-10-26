@@ -84,6 +84,7 @@ class FirmwareTools:
   if not board['compatible']:raise ValueError('La scheda rilevata non è una Mega 2560.')
  def start(self,operation,port='',confirmed=False):
   if operation not in ('scan','compile','setup','upload'):raise ValueError('Operazione firmware non valida.')
+  if operation=='upload' and os.environ.get('DOC_REGIA_NO_HARDWARE')=='1':raise ValueError('Il caricamento sulla Mega è disabilitato nell’anteprima isolata.')
   # Controller gate is shared with normal motion commands, avoiding a connect/upload race.
   with self.controller.lock,self.lock:
    if self.busy:raise ValueError('Operazione firmware già in corso.')
@@ -114,7 +115,7 @@ class FirmwareTools:
     if board:
      self.stage('checking','Verifica della scheda selezionata…')
      self.verify_port(board['port'],board['identity'])
-    source=Path(__file__).parent/'RegiaDemo'
+    source=self.workspace.path if hasattr(self,'workspace') else Path(__file__).parent/'RegiaDemo'
     if not (source/'RegiaDemo.ino').is_file():raise ValueError('Firmware non incluso nell’app.')
     with tempfile.TemporaryDirectory(prefix='robot-console-firmware-') as temp:
      sketch=Path(temp)/'RegiaDemo';shutil.copytree(source,sketch)

@@ -11,17 +11,33 @@ DATA.mkdir(parents=True,exist_ok=True)
 from serial_transport import ensure_port_available, claim_exclusive
 USB_BOOT_QUIET=3.0
 HELLO_RETRY=4.0
+AXES=6
 TOKEN=secrets.token_urlsafe(24)
 class Controller:
  def __init__(self):
   self.journal=None; self.firmware_busy=False; self.lock=threading.RLock(); self.fd=None; self.mode='demo'; self.connected=False
-  self.home=False; self.pos=[0.0]*5; self.limits=[[0.0,0.0] for _ in range(5)]
+  self.home=False; self.pos=[0.0]*AXES; self.limits=[[0.0,0.0] for _ in range(AXES)]
   self.trail=[]; self.sequence=[]; self.events=[]; self.busy=False; self.playing=False
   self.repeat_cycle=False; self.paused=False; self.generation=0; self.done=threading.Event(); self.browser=time.monotonic()
   self.speed=5.0; self.requested_speed=5.0; self.speed_confirmed=False; self.speed_sent=0.0; self.firmware=''; self.connected_at=0.0; self.last_hello=0.0
   self.sequence_undo=None; self.max_speed=20.0; self.sequence_revision=0; self.awaiting_halt=False; self.boot_ready_at=0.0; self.serial_lines=0; self.last_serial=''; self.error=''; self.grip='non comandata'; self.cycle=0; self.identified=False; self.rx=b''
+  self.axes_enabled=[True]*AXES;self.motion=None;self.firmware_profile="";self.profile_error="";self.profile_speed_limit=20.;self.reported_axes=5;self.configured_axes=5
+  self.axis_speeds=[5.0]*AXES;self.axis_control=False;self.drive_caps=[False]*AXES;self.drive_state=[None]*AXES;self.pending_off={};self.preparing_axis=None
+  try:
+   values=json.loads((DATA/'axis_speeds.json').read_text())
+   if len(values)==AXES and all(type(v) in (int,float) and math.isfinite(v) and 1<=v<=20 for v in values):self.axis_speeds=values
+  except (OSError,ValueError,TypeError):pass
+  try:
+   if (DATA/'axes_enabled.json').exists():
+    mask=json.loads((DATA/'axes_enabled.json').read_text())
+    if not isinstance(mask,list) or len(mask) not in (5,AXES) or any(type(v)!=bool for v in mask):raise ValueError('Maschera giunti non valida')
+    self.axes_enabled=mask+[True]*(AXES-len(mask))
+  except (OSError,ValueError):self.axes_enabled=[False]*AXES;self.error='Abilitazione giunti illeggibile: movimenti bloccati.'
   if (DATA/'sequenza.json').exists():
-   try:self.sequence=json.loads((DATA/'sequenza.json').read_text())['sequence']
+   try:
+    self.sequence=json.loads((DATA/'sequenza.json').read_text())['sequence']
+    for pose in self.sequence:
+     if isinstance(pose.get('pos'),list) and len(pose['pos'])==5:pose['pos'].append(0.)
    except (ValueError,KeyError):self.error='Sequenza salvata non leggibile'
   threading.Thread(target=self.io,daemon=True).start()
  def log(self,s):
@@ -38,7 +54,7 @@ class Controller:
      self.awaiting_halt=self.fd is not None
      self.write('!')
    except OSError:pass
-   self.generation+=1; self.home=False; self.playing=False; self.paused=False; self.busy=False
+   self.generation+=1; self.home=False; self.playing=False; self.paused=False; self.busy=False;self.motion=None;self.preparing_axis=None
    self.error=reason; self.done.set(); self.log(reason)
  def receive(self,s):
   with self.lock:
@@ -50,13 +66,37 @@ class Controller:
      self.identified=False;self.speed_confirmed=False
      self.error='Firmware non compatibile: usa la sezione Firmware per caricare il firmware incluso.';return
     if self.identified and (self.home or self.busy):self.halt('Reset della Mega: home da ristabilire.')
-    self.max_speed=20.0 if s=='DOC REGIA 4' else 10.0
-    first=not self.identified;self.identified=True
-    if first:
-     self.error='';self.speed_confirmed=False;self.speed_sent=0.0
-     self.log('Firmware riconosciuto; verifica velocità in corso.')
+    self.max_speed=min(20.0 if s=='DOC REGIA 4' else 10.0,self.profile_speed_limit)
+    self.identified=True
+    self.axis_control=False;self.drive_caps=[False]*AXES;self.drive_state=[None]*AXES
+    # A startup identity may mean the board reset to its default speed/ENABLEs.
+    # Require fresh acknowledgements instead of retaining stale hardware state.
+    self.speed_confirmed=False;self.speed_sent=0.0
+    if not self.error.startswith('Reset della Mega'):self.error=''
+    self.log('Firmware riconosciuto; verifica velocità in corso.')
    elif s.startswith('Formato: j1 ') or s.startswith('TEST 5 STEPPER'):
     if not self.identified:self.error='Firmware di test rilevato: serve Regia dall’app. Apri Firmware, seleziona la Mega attuale e carica il firmware incluso.'
+   elif s.startswith('CAPS '):
+    try:self.reported_axes=max(5,min(AXES,int(s[5:])))
+    except ValueError:pass
+   elif s=='FEATURES AXIS_ENABLE':self.axis_control=True
+   elif s.startswith('DRIVE_CAPS '):
+    bits=s[11:]
+    if len(bits)==AXES and set(bits)<=set('01'):self.drive_caps=[v=='1' for v in bits]
+   elif s.startswith('DRIVES '):
+    bits=s[7:]
+    if len(bits)==AXES and set(bits)<=set('01?'):self.drive_state=[None if v=='?' else v=='1' for v in bits]
+   elif s.startswith('AXIS_OFF '):
+    try:axis=int(s[9:])-1
+    except ValueError:return
+    if axis in self.pending_off:
+     del self.pending_off[axis]
+     if self.drive_caps[axis] and self.drive_state[axis] is not False:
+      self.halt('ENABLE non confermato disattivato: stato del driver incerto.');return
+     self.log('J%d: %s'%(axis+1,'ENABLE disattivato; corrente alle bobine esclusa dal driver.' if self.drive_caps[axis] else 'movimenti esclusi; ENA non collegato, coppia ancora possibile.'))
+   elif s.startswith('CONFIG '):
+    self.firmware_profile=s[7:].strip()
+    if not self.hardware_ok():self.error='Profilo firmware diverso dal profilo attivo: movimenti bloccati.'
    elif s.startswith('SPEED '):
     try:value=float(s[6:])
     except ValueError:return
@@ -90,6 +130,9 @@ class Controller:
        self.error=('Mega senza risposta USB: verifica il cavo, premi RESET sulla Mega e attendi. Non serve ricaricare se il caricamento è già riuscito.' if not self.serial_lines else 'Dati USB ricevuti, ma identificazione non valida. Ultima riga: '+self.last_serial)
      if self.identified and not self.speed_confirmed and self.speed_sent and now-self.speed_sent>3:
       self.error='Velocità non confermata dalla Mega: comandi di movimento bloccati.'
+     if any(now-deadline>3 for deadline in self.pending_off.values()):
+      for axis in self.pending_off:self.drive_state[axis]=None
+      self.pending_off.clear();self.halt('Disabilitazione non confermata: corrente del driver non verificata.');continue
      if select.select([self.fd],[],[],0)[0]:
       data=os.read(self.fd,4096)
       if not data:raise OSError('USB scollegata')
@@ -103,18 +146,33 @@ class Controller:
   if not self.identified and self.connected and time.monotonic()<self.boot_ready_at:return '1 · Avvio Mega: attendo 3 secondi senza trasmettere sulla USB.'
   if not self.identified:return '1 · Porta USB aperta. Attendi il riconoscimento; consulta il messaggio diagnostico sotto. Il LED verde indica alimentazione USB.'
   if not self.speed_confirmed:return '1 · Attendi la conferma della velocità: finché manca, i movimenti sono bloccati.'
+  if not self.hardware_ok():return '1 · Firmware e profilo non corrispondono: verifica i parametri e il sorgente, poi genera e carica il firmware corretto.'
   if not self.home:return '2 · Conferma HOME: scegli la posizione iniziale del braccio. In Anteprima confermi solo uno zero virtuale.'
   if all(lo==hi for lo,hi in self.limits):return '3 · Imposta e applica i limiti. Ora sono tutti 0/0: ogni giunto è bloccato. Per esempio, in Anteprima prova J1 da -5 a +5.'
   return '4 · Muovi con +/−, osserva il risultato e premi Registra posa. Per riprodurre torna prima a HOME.'
  def state(self):
-  with self.lock:return dict(mode=self.mode,connected=self.connected,home=self.home,pos=self.pos[:],limits=self.limits,trail=len(self.trail),sequence=self.sequence,sequence_revision=self.sequence_revision,can_undo=self.sequence_undo is not None,max_speed=self.max_speed,events=self.events,busy=self.busy,playing=self.playing,paused=self.paused,error=self.error,grip=self.grip,identified=self.identified,firmware=self.firmware,speed=self.speed,speed_confirmed=self.speed_confirmed,guidance=self.guide(),cycle=self.cycle,ports=glob.glob('/dev/cu.usbmodem*')+glob.glob('/dev/cu.usbserial*'))
+  with self.lock:
+   preview=self.pos[:]
+   if self.motion:
+    m=self.motion;f=max(0,min(1,(time.time()-m['started'])/max(.01,m['duration'])))
+    preview[m['axis']]=m['start']+(m['target']-m['start'])*f
+   return dict(axis_speeds=[min(v,self.max_speed) for v in self.axis_speeds],axis_control=self.mode=='demo' or self.axis_control,drive_caps=[True]*AXES if self.mode=='demo' else self.drive_caps,drive_state=self.drive_state,pending_off=list(self.pending_off),active_axis=self.motion['axis'] if self.motion else self.preparing_axis,axes_available=[self.mode=='demo' or i<min(self.reported_axes,self.configured_axes) for i in range(AXES)],hardware_ok=self.hardware_ok(),firmware_profile=self.firmware_profile,mode=self.mode,connected=self.connected,home=self.home,pos=self.pos[:],preview_pos=preview,motion=self.motion,axes_enabled=self.axes_enabled[:],limits=self.limits,trail=len(self.trail),sequence=self.sequence,sequence_revision=self.sequence_revision,can_undo=self.sequence_undo is not None,max_speed=self.max_speed,events=self.events,busy=self.busy,playing=self.playing,paused=self.paused,error=self.error,grip=self.grip,identified=self.identified,firmware=self.firmware,speed=self.speed,speed_confirmed=self.speed_confirmed,guidance=self.guide(),cycle=self.cycle,ports=glob.glob('/dev/cu.usbmodem*')+glob.glob('/dev/cu.usbserial*'))
+ def hardware_ok(self):
+  if self.profile_error:return False
+  expected=getattr(self,'expected_profile','')
+  if not expected:return True
+  if self.firmware_profile:return self.firmware_profile==expected
+  return getattr(self,'profile_default',True)
  def check(self):
   if not self.connected:raise ValueError('Connetti prima la modalità scelta.')
   if not self.identified or not self.speed_confirmed:raise ValueError('Firmware o velocità non confermati: completa la connessione.')
+  if not self.hardware_ok():raise ValueError('Firmware e profilo hardware non corrispondono. Genera, compila e carica il profilo scelto.')
   if not self.home:raise ValueError('Metti fisicamente il braccio nella home e confermala.')
  def validate(self,a,d):
-  if not isinstance(a,int) or not 0<=a<5:raise ValueError('Asse non valido')
+  if not isinstance(a,int) or not 0<=a<AXES:raise ValueError('Asse non valido')
   if not isinstance(d,(int,float)) or not math.isfinite(d) or abs(d)>360:raise ValueError('Angolo non valido')
+  if self.mode=='robot' and a>=min(self.reported_axes,self.configured_axes):raise ValueError('J6 richiede firmware configurato e driver esterno: nessun impulso inviato.')
+  if not self.axes_enabled[a] and abs(d)>.001:raise ValueError('J%d disabilitato: riabilitalo prima di comandare questo movimento.'%(a+1))
   target=round(self.pos[a]+d,2)
   if not self.limits[a][0]<=target<=self.limits[a][1]:raise ValueError('Il movimento supera i limiti impostati di J'+str(a+1))
   return target
@@ -124,8 +182,23 @@ class Controller:
    if gen!=self.generation:raise ValueError('Interrotto')
    target=self.validate(a,d); self.busy=True; self.done.clear()
    if abs(d)<.001:return
+   speed=min(self.axis_speeds[a],self.max_speed)
+   self.preparing_axis=a
+   if self.mode=='robot' and abs(self.speed-speed)>.005:
+    self.requested_speed=speed;self.speed_confirmed=False;self.speed_sent=time.monotonic();self.write('~speed %.2f\n'%speed)
+  # Do not hold the serial-reader lock while waiting for the speed acknowledgement.
+  deadline=time.monotonic()+3
+  while self.mode=='robot' and not self.speed_confirmed:
+   if gen!=self.generation:raise ValueError('Interrotto')
+   if time.monotonic()>deadline:raise ValueError('Velocità del giunto non confermata: nessun movimento inviato.')
+   time.sleep(.01)
+  with self.lock:
+   self.check()
+   if gen!=self.generation:raise ValueError('Interrotto')
+   self.validate(a,d);self.preparing_axis=None
+   self.motion=dict(axis=a,start=self.pos[a],target=target,started=time.time(),duration=abs(d)/speed+.5)
    self.write('j%d %.2f\n'%(a+1,d))
-  duration=abs(d)/self.speed+.5
+  duration=abs(d)/speed+.5
   if self.mode=='demo':
    end=time.monotonic()+duration
    while time.monotonic()<end:
@@ -135,7 +208,7 @@ class Controller:
    self.halt('Timeout: posizione incerta, home da ristabilire.');raise ValueError('Timeout')
   with self.lock:
    if gen!=self.generation:raise ValueError('Interrotto')
-   self.pos[a]=target
+   self.pos[a]=target;self.motion=None
    self.log('J%d %+.2f° → %.2f° · %s'%(a+1,d,target,'anteprima' if self.mode=='demo' else 'DONE firmware, posizione non misurata'))
    if record:self.trail.append(dict(axis=a,delta=d))
    if len(self.trail)>4000:self.halt('Percorso troppo lungo: salva e ristabilisci home.');raise ValueError('Limite percorso')
@@ -147,6 +220,7 @@ class Controller:
    if gen!=self.generation:raise ValueError('Interrotto')
    time.sleep(.05)
  def back(self,gen):
+  self.validate_path(self.trail)
   while self.trail:
    while self.paused:
     if gen!=self.generation:raise ValueError('Interrotto')
@@ -155,6 +229,7 @@ class Controller:
    with self.lock:self.trail.pop()
   self.log('Home raggiunta secondo il conteggio impulsi. Pinza mantenuta.')
  def follow_path(self,path,gen):
+  self.validate_path(self.trail);self.validate_path(path)
   common=0
   while common<min(len(self.trail),len(path)) and self.trail[common]==path[common]:common+=1
   def wait_ready():
@@ -169,6 +244,13 @@ class Controller:
   for step in path[common:]:
    wait_ready();self.move(step['axis'],step['delta'],gen)
   wait_ready()
+ def validate_path(self,path):
+  for step in path:
+   if type(step.get('axis'))!=int or not 0<=step['axis']<AXES:raise ValueError('Asse del percorso non valido.')
+   delta=step.get('delta')
+   if type(delta) not in (int,float) or not math.isfinite(delta) or abs(delta)>360:raise ValueError('Spostamento del percorso non valido.')
+   if self.mode=='robot' and step['axis']>=min(self.reported_axes,self.configured_axes) and abs(delta)>.001:raise ValueError('Il percorso richiede J6, non configurato sul robot reale.')
+   if abs(delta)>.001 and not self.axes_enabled[step['axis']]:raise ValueError('Il percorso richiede J%d, attualmente disabilitato.'%(step['axis']+1))
  def spawn(self,fn):
   gen=self.generation;self.busy=True
   def run():
@@ -181,15 +263,15 @@ class Controller:
      if gen==self.generation:self.busy=False;self.playing=False
   threading.Thread(target=run,daemon=True).start()
  def edit_pose(self,pose,b):
-  name=b.get('name');dwell=b.get('dwell');pos=b.get('pos');grip=b.get('grip');enabled=b.get('enabled')
+  name=b.get('name');dwell=b.get('dwell');pos=b.get('pos');pos=pos+[0.] if isinstance(pos,list) and len(pos)==5 else pos;grip=b.get('grip');enabled=b.get('enabled')
   if not isinstance(name,str) or not name.strip() or len(name)>60:raise ValueError('Nome posa: da 1 a 60 caratteri.')
   if type(dwell) not in (int,float) or not math.isfinite(dwell) or not 0<=dwell<=60:raise ValueError('Pausa da 0 a 60 secondi.')
-  if not isinstance(pos,list) or len(pos)!=5 or any(type(v) not in (int,float) or not math.isfinite(v) or not -360<=v<=360 for v in pos):raise ValueError('Inserisci cinque angoli assoluti da −360° a +360°.')
+  if not isinstance(pos,list) or len(pos)!=AXES or any(type(v) not in (int,float) or not math.isfinite(v) or not -360<=v<=360 for v in pos):raise ValueError('Inserisci sei angoli assoluti da −360° a +360°.')
   if grip not in ('apri','chiudi','non comandata') or type(enabled)!=bool:raise ValueError('Stato pinza o abilitazione non validi.')
-  result=json.loads(json.dumps(pose));target=[round(v,2) for v in pos]
-  if target!=pose['pos']:
+  result=json.loads(json.dumps(pose));target=[round(v,2) for v in pos];result['pos']=target
+  if target!=pose['pos']+[0.]*(AXES-len(pose['pos'])):
    # Keep the taught route as an anchor. Repeated edits replace only its extension.
-   base=pose.get('edit_base_path',pose['path']);p=[0.0]*5
+   base=pose.get('edit_base_path',pose['path']);p=[0.0]*AXES
    for step in base:p[step['axis']]+=step['delta']
    path=json.loads(json.dumps(base))
    for axis,value in enumerate(target):
@@ -204,7 +286,44 @@ class Controller:
   with self.lock:
    op=b['op'];self.browser=time.monotonic()
    if op=='heartbeat':return
-   if self.firmware_busy and op!='stop':raise ValueError('Attendi il termine dell’operazione firmware.')
+   if self.firmware_busy and op not in ('stop','axis_stop'):raise ValueError('Attendi il termine dell’operazione firmware.')
+   if op=='axis_stop':
+    axis=b.get('axis')
+    if type(axis)!=int or not 0<=axis<AXES:raise ValueError('Asse non valido')
+    active=self.motion['axis'] if self.motion else self.preparing_axis
+    if active==axis:self.halt('STOP J%d: impulsi interrotti, tenuta mantenuta. Ristabilisci HOME.'%(axis+1))
+    else:self.log('STOP J%d: giunto già fermo; nessun altro asse arrestato.'%(axis+1))
+    return
+   if op=='joint_enable':
+    axis=b.get('axis');enabled=b.get('enabled')
+    if type(axis)!=int or not 0<=axis<AXES or type(enabled)!=bool:raise ValueError('Abilitazione giunto non valida.')
+    if enabled and (self.busy or self.playing):raise ValueError('Riabilita il giunto a movimento fermo.')
+    if self.connected and self.mode=='robot':
+     if not self.identified or not self.axis_control:raise ValueError('Per gestire ENABLE serve il nuovo firmware: scollega, aggiorna i comandi giunti, compila e carica il profilo. Nessuna corrente disattivata.')
+     if enabled and self.pending_off:raise ValueError('Attendi la conferma di disabilitazione del driver.')
+    mask=self.axes_enabled[:];mask[axis]=enabled
+    tmp=DATA/'axes_enabled.tmp';tmp.write_text(json.dumps(mask));tmp.replace(DATA/'axes_enabled.json');self.axes_enabled=mask
+    if self.connected and self.mode=='robot':
+     if not enabled:
+      moving=self.motion is not None
+      self.halt('J%d escluso: sequenza interrotta; ristabilisci HOME.'%(axis+1),False)
+      self.awaiting_halt=moving;self.pending_off[axis]=time.monotonic()
+      self.write('~off %d\n'%(axis+1))
+     else:
+      self.home=False;self.write('~mask '+''.join('1' if v else '0' for v in mask)+'\n')
+      self.log('J%d incluso: ENABLE verrà attivato alla conferma HOME.'%(axis+1))
+    else:
+     if not enabled and self.busy:self.halt('Giunto escluso: anteprima interrotta.',False)
+     if self.mode=='demo':self.drive_state[axis]=enabled and self.home
+     self.log('J%d: %s; %s.'%(axis+1,'incluso' if enabled else 'escluso','anteprima' if self.mode=='demo' else 'maschera salvata, driver non connesso'))
+    return
+   if op=='set_axis_speed':
+    axis=b.get('axis');value=b.get('speed')
+    if type(axis)!=int or not 0<=axis<AXES or type(value) not in (int,float) or not math.isfinite(value) or not 1<=value<=self.max_speed:raise ValueError('Velocità giunto non valida.')
+    if self.busy or self.playing:raise ValueError('Modifica la velocità a movimento fermo.')
+    values=self.axis_speeds[:];values[axis]=round(value,2)
+    tmp=DATA/'axis_speeds.tmp';tmp.write_text(json.dumps(values));tmp.replace(DATA/'axis_speeds.json');self.axis_speeds=values
+    self.log('J%d: velocità %.2f gradi/s, applicata al prossimo movimento.'%(axis+1,value));return
    if op=='stop':self.halt('STOP operatore: verifica e ristabilisci la home.');return
    if op=='pause':self.paused=not self.paused;return
    if op=='end_cycle':
@@ -217,10 +336,12 @@ class Controller:
     self.connected=False;self.home=False;self.identified=False;self.speed_confirmed=False
     return
    if op=='connect':
+    if b.get('mode')=='robot' and os.environ.get('DOC_REGIA_NO_HARDWARE')=='1':raise ValueError('Questa anteprima isolata non può aprire la USB del robot.')
     if self.busy or self.playing:raise ValueError('Ferma prima il movimento')
     if self.fd is not None:os.close(self.fd);self.fd=None
-    self.connected=False;self.home=False;self.trail=[];self.pos=[0.0]*5;self.error='';self.limits=[[0.0,0.0] for _ in range(5)];self.grip='non comandata'
-    self.max_speed=20.0 if b.get('mode','demo')=='demo' else 10.0;self.awaiting_halt=False;self.serial_lines=0;self.last_serial='';self.mode=b.get('mode','demo');self.identified=False;self.rx=b'';self.firmware='';self.speed=5.0;self.requested_speed=5.0;self.speed_confirmed=False;self.connected_at=time.monotonic();self.boot_ready_at=self.connected_at+USB_BOOT_QUIET;self.last_hello=self.connected_at-HELLO_RETRY
+    self.axis_control=False;self.drive_caps=[False]*AXES;self.drive_state=[None]*AXES;self.pending_off.clear();self.preparing_axis=None
+    self.connected=False;self.home=False;self.trail=[];self.pos=[0.0]*AXES;self.error='';self.limits=[[0.0,0.0] for _ in range(AXES)];self.grip='non comandata'
+    self.max_speed=min(20.0 if b.get('mode','demo')=='demo' else 10.0,self.profile_speed_limit);self.awaiting_halt=False;self.serial_lines=0;self.last_serial='';self.mode=b.get('mode','demo');self.reported_axes=5;self.identified=False;self.rx=b'';self.firmware='';self.speed=min(5.0,self.max_speed);self.requested_speed=self.speed;self.firmware_profile='';self.speed_confirmed=False;self.connected_at=time.monotonic();self.boot_ready_at=self.connected_at+USB_BOOT_QUIET;self.last_hello=self.connected_at-HELLO_RETRY
     if self.mode=='robot':
      port=b['port']
      if port not in glob.glob('/dev/cu.usbmodem*')+glob.glob('/dev/cu.usbserial*'):raise ValueError('Porta USB non valida')
@@ -242,7 +363,7 @@ class Controller:
      self.connected=True
      # handshake is asynchronous; home is refused until the version is recognized
      self.log('Attesa avvio Mega: 3 secondi di silenzio USB, poi riconoscimento.')
-    else:self.connected=True;self.identified=True;self.firmware='Anteprima';self.speed_confirmed=True
+    else:self.connected=True;self.identified=True;self.firmware='Anteprima';self.speed_confirmed=True;self.firmware_profile=getattr(self,'expected_profile','')
     self.log('Modalità '+self.mode+' connessa');return
    if op=='pose_undo':
     if self.busy or self.playing:raise ValueError('Attendi la fine della sequenza.')
@@ -276,20 +397,28 @@ class Controller:
     value=b.get('speed')
     if isinstance(value,bool) or not isinstance(value,(int,float)) or not math.isfinite(value) or not 1<=value<=self.max_speed:raise ValueError('Velocità da 1 a %.0f gradi/s; per 20 gradi/s carica il firmware incluso.'%self.max_speed)
     if not self.identified:raise ValueError('Prima carica e collega il firmware Regia 2.')
+    self.axis_speeds=[round(value,2)]*AXES
+    tmp=DATA/'axis_speeds.tmp';tmp.write_text(json.dumps(self.axis_speeds));tmp.replace(DATA/'axis_speeds.json')
     self.requested_speed=round(value,2)
     if self.mode=='demo':self.speed=self.requested_speed;self.speed_confirmed=True
     else:
      self.speed_confirmed=False;self.speed_sent=time.monotonic();self.write('~speed %.2f\n'%self.requested_speed)
     return
    if op=='home_set':
+    if self.awaiting_halt:raise ValueError('Attendi la conferma STOP della Mega prima di confermare HOME.')
+    if not self.hardware_ok():raise ValueError('Profilo firmware non corrispondente: HOME non abilitata.')
     if self.busy or self.playing:raise ValueError('Movimento in corso')
     if not self.identified:raise ValueError('Firmware Regia non riconosciuto: caricalo dalla sezione Firmware dell’app')
     if not self.speed_confirmed:raise ValueError('Attendi la conferma della velocità dalla Mega.')
-    self.write('~arm\n');self.home=True;self.pos=[0.0]*5;self.trail=[];self.error='';self.log('Zero virtuale confermato' if self.mode=='demo' else 'Home fisica confermata dall’operatore');return
+    if self.pending_off:raise ValueError('Attendi la conferma di disabilitazione del driver.')
+    if self.mode=='robot':
+     if self.axis_control:self.write('~mask '+''.join('1' if v else '0' for v in self.axes_enabled)+'\n')
+     elif not all(self.axes_enabled[:min(self.reported_axes,self.configured_axes)]):raise ValueError('Aggiorna il firmware per mantenere disabilitati i driver esclusi durante HOME.')
+    self.write('~arm\n');self.home=True;self.pos=[0.0]*AXES;self.trail=[];self.error='';self.log('Zero virtuale confermato' if self.mode=='demo' else 'Home fisica confermata dall’operatore');return
    if op=='limits':
     if self.busy or self.playing:raise ValueError('Ferma prima la sequenza')
-    v=b['limits']
-    if len(v)!=5 or any(len(x)!=2 or any(not isinstance(n,(int,float)) or not math.isfinite(n) for n in x) or not -360<=x[0]<=0<=x[1]<=360 or not x[0]<=p<=x[1] for x,p in zip(v,self.pos)):raise ValueError('Limiti non validi: devono contenere zero e la posizione attuale')
+    v=b['limits'];v=v+[[0.,0.]] if isinstance(v,list) and len(v)==5 else v
+    if len(v)!=AXES or any(len(x)!=2 or any(not isinstance(n,(int,float)) or not math.isfinite(n) for n in x) or not -360<=x[0]<=0<=x[1]<=360 or not x[0]<=p<=x[1] for x,p in zip(v,self.pos)):raise ValueError('Limiti non validi: devono contenere zero e la posizione attuale')
     self.limits=v;return
    self.check()
    if self.busy or self.playing:raise ValueError('Attendi il termine o usa STOP')
@@ -310,15 +439,16 @@ class Controller:
     self.sequence.append(dict(name=name,mode=self.mode,pos=self.pos[:],path=[x.copy() for x in self.trail],grip=grip,dwell=dwell,enabled=True))
     self.save();return
    if op=='clear':self.sequence_undo=json.loads(json.dumps(self.sequence));self.sequence=[];self.save();return
-   if op=='home':self.spawn(self.back);return
+   if op=='home':self.validate_path(self.trail);self.spawn(self.back);return
    if op=='play':
     active=[pose for pose in self.sequence if pose.get('enabled',True)]
     if not active:raise ValueError('Abilita almeno una posa per riprodurre la sequenza.')
     if self.trail or any(abs(x)>.01 for x in self.pos):raise ValueError('Torna a home prima della riproduzione')
     # Validate every stored path before starting; reordered transitions reuse its edges.
     for pose in active:
+     self.validate_path(pose['path'])
      if pose.get('mode')!=self.mode:raise ValueError('Registra le pose nella modalità corrente: le anteprime non sono percorsi provati sul robot.')
-     p=[0.0]*5
+     p=[0.0]*AXES
      for x in pose['path']:
       p[x['axis']]+=x['delta']
       if not self.limits[x['axis']][0]-.001<=p[x['axis']]<=self.limits[x['axis']][1]+.001:raise ValueError('Sequenza fuori dai limiti attuali')

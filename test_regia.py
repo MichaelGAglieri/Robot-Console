@@ -12,7 +12,7 @@ class Tests(unittest.TestCase):
   self.assertFalse(self.c.busy)
  def test_limits_reject_no_motion(self):
   with self.assertRaises(ValueError):self.c.action({'op':'jog','axis':0,'delta':3})
-  self.assertEqual(self.c.pos,[0]*5)
+  self.assertEqual(self.c.pos,[0]*6)
  def test_large_jog_and_limits(self):
   from unittest.mock import Mock
   self.c.action({'op':'limits','limits':[[-360,360]]*5})
@@ -27,30 +27,30 @@ class Tests(unittest.TestCase):
   self.assertEqual(self.c.spawn.call_count,16)
  def test_stop_invalidates_home(self):
   self.c.action({'op':'jog','axis':1,'delta':1});self.c.action({'op':'stop'});time.sleep(.1)
-  self.assertFalse(self.c.home);self.assertEqual(self.c.pos,[0]*5)
+  self.assertFalse(self.c.home);self.assertEqual(self.c.pos,[0]*6)
   with self.assertRaises(ValueError):self.c.action({'op':'home'})
  def test_reverse_path(self):
   self.c.action({'op':'jog','axis':0,'delta':.25});self.wait()
   self.c.action({'op':'jog','axis':1,'delta':-.25});self.wait()
   self.assertEqual(len(self.c.trail),2)
-  self.c.action({'op':'home'});self.wait();self.assertEqual(self.c.pos,[0]*5);self.assertFalse(self.c.trail)
+  self.c.action({'op':'home'});self.wait();self.assertEqual(self.c.pos,[0]*6);self.assertFalse(self.c.trail)
  def test_replay(self):
   self.c.action({'op':'jog','axis':0,'delta':.25});self.wait()
   self.c.sequence=[dict(name='test',mode='demo',pos=self.c.pos[:],path=self.c.trail[:],grip='non comandata',dwell=0)]
   self.c.action({'op':'home'});self.wait()
   self.c.action({'op':'play','repeat':False});self.wait()
-  self.assertEqual(self.c.cycle,1);self.assertEqual(self.c.pos,[0]*5)
+  self.assertEqual(self.c.cycle,1);self.assertEqual(self.c.pos,[0]*6)
  def test_preview_cannot_run_on_robot(self):
-  self.c.sequence=[dict(name='preview',mode='demo',pos=[0]*5,path=[],grip='non comandata',dwell=0)]
+  self.c.sequence=[dict(name='preview',mode='demo',pos=[0]*6,path=[],grip='non comandata',dwell=0)]
   self.c.mode='robot'
   with self.assertRaises(ValueError):self.c.action({'op':'play'})
   self.assertFalse(self.c.playing)
  def test_return_owns_motion_until_complete(self):
-  self.c.trail=[dict(axis=0,delta=.25),dict(axis=1,delta=.25)];self.c.pos=[.25,.25,0,0,0]
+  self.c.trail=[dict(axis=0,delta=.25),dict(axis=1,delta=.25)];self.c.pos=[.25,.25,0,0,0,0]
   self.c.action({'op':'home'})
   time.sleep(.6)
   with self.assertRaises(ValueError):self.c.action({'op':'jog','axis':2,'delta':.25})
-  self.wait();self.assertEqual(self.c.pos,[0]*5)
+  self.wait();self.assertEqual(self.c.pos,[0]*6)
  def test_speed_range_and_busy(self):
   for value in [0,20.1,float('nan'),True]:
    with self.assertRaises(ValueError):self.c.action({'op':'set_speed','speed':value})

@@ -30,7 +30,7 @@ import AVFoundation
   }
  }
  private func begin(_ receive:@escaping (String)->Void) {
-  guard let recognizer=SFSpeechRecognizer(locale:Locale(identifier:"it-IT")),recognizer.isAvailable else {message="Riconoscimento italiano non disponibile. Puoi scrivere nella chat.";return}
+  guard let recognizer=SFSpeechRecognizer(locale:Locale(identifier:AppLanguage.current == .english ? "en-US" : "it-IT")),recognizer.isAvailable else {message="Riconoscimento italiano non disponibile. Puoi scrivere nella chat.";return}
   // Keep audio on this Mac; never silently fall back to remote recognition.
   guard recognizer.supportsOnDeviceRecognition else {message="Dettatura locale non disponibile su questo Mac. Usa il campo di testo.";return}
   let r=SFSpeechAudioBufferRecognitionRequest()

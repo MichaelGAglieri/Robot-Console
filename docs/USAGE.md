@@ -1,4 +1,10 @@
+> Per le funzioni della build locale 2.0 (URDF, J6, editor firmware, programmi e ROS) leggi [STUDIO.md](STUDIO.md).
+
 # Uso di Robot Console
+
+## Tema dell’interfaccia
+
+Nel selettore **Tema**, in alto, scegli **Chiara**, **Scura** oppure **Sistema**. Sistema segue automaticamente l’aspetto di macOS, anche se cambia mentre l’app è aperta. La scelta si applica anche all’editor delle pose e alle finestre di dialogo, viene salvata sul Mac ed è disponibile anche nel menu **Aspetto → Tema**. Al primo avvio è selezionato Sistema.
 
 ## Anteprima
 
@@ -23,6 +29,8 @@ La sezione firmware usa Arduino CLI, core arduino:avr 1.8.8 e AccelStepper 1.64.
 Conferma HOME solo dopo avere posizionato il braccio nel riferimento fisico scelto. Applica limiti compatibili con il montaggio. Le conferme seriali contano impulsi comandati: non verificano che il motore non abbia perso passi. Per chiudere usa HOME e chiudi e verifica il ritorno visivamente; STOP ed esci interrompe gli impulsi senza certificare l’isolamento di potenza.
 
 ## IA e dati locali
+
+**Leggi risposta** pronuncia il contenuto dell’ultima risposta dell’assistente. L’intestazione `[Ollama locale · nome del modello]` rimane visibile nella chat e viene esclusa dalla lettura vocale per tutti i modelli, anche nelle risposte già salvate.
 
 Ollama è opzionale: l’app rileva il servizio e i modelli locali, può avviarlo e caricare il modello scelto. Non scarica automaticamente pesi. Ferma IA scarica il modello selezionato dalla memoria; un servizio Ollama già avviato da altre applicazioni può restare attivo. La chat non dispone di comandi di movimento.
 
