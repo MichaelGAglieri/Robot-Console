@@ -71,12 +71,12 @@ struct CameraPanel:View {
  @StateObject var camera=CameraMonitor();@State private var expanded=false
  var body:some View {
   Panel(title:"Visione · telecamera locale") {
-   HStack{RText(camera.status).font(.caption).foregroundStyle(RobotTheme.secondary);Spacer();Button(camera.running ? "Ferma video" : "Avvia video"){camera.running ? camera.stop() : camera.start()}}
+   HStack{RText(camera.status).robotCaption().foregroundStyle(RobotTheme.secondary);Spacer();Button(camera.running ? "Ferma video" : "Avvia video"){camera.running ? camera.stop() : camera.start()}}
    DisclosureGroup("Video, fotogrammi e codici",isExpanded:$expanded){
     HStack{Picker("Telecamera",selection:$camera.selected){ForEach(camera.devices,id:\.uniqueID){RText($0.localizedName).tag($0.uniqueID)}}.disabled(camera.running);Button("Aggiorna dispositivi"){camera.refresh()};Button("Salva fotogramma…"){camera.saveFrame()}.disabled(!camera.running);Button("Rileva QR"){camera.detectCodes()}.disabled(!camera.running)}
     if camera.running{CameraPreview(session:camera.session).frame(height:260).background(.black,in:RoundedRectangle(cornerRadius:10))}
-    if !camera.codes.isEmpty{RText(camera.codes).font(.caption.monospaced()).textSelection(.enabled)}
-    RText("Video e riconoscimento QR sono locali. Il contenuto rilevato viene mostrato come dato e non esegue comandi. Calibrazione ottica, AprilTag e stima 3D degli oggetti richiedono ulteriori modelli e un adattatore di visione.").font(.caption).foregroundStyle(RobotTheme.secondary)
+    if !camera.codes.isEmpty{RText(camera.codes).robotCaption(mono:true).textSelection(.enabled)}
+    RText("Video e riconoscimento QR sono locali. Il contenuto rilevato viene mostrato come dato e non esegue comandi. Calibrazione ottica, AprilTag e stima 3D degli oggetti richiedono ulteriori modelli e un adattatore di visione.").robotCaption().foregroundStyle(RobotTheme.secondary)
    }
   }.onAppear{camera.refresh()}.onDisappear{camera.stop()}
  }

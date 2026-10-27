@@ -181,7 +181,7 @@ necessario per le funzioni locali; Ollama usa un modello già presente sul Mac.
 In **Muovi e osserva**, ogni scheda J1–J6 ha una velocità in °/s: usa lo slider
 oppure scrivi il numero e premi Invio o ✓. Le velocità sono salvate su questo Mac
 ed entrano in funzione al movimento successivo, anche nei programmi e nel ritorno
-HOME. Il controllore esegue **un giunto alla volta**. Il limite resta quello del
+HOME. I singoli jog e i target Studio conservano il percorso sequenziale; la build 27 aggiunge gruppi simultanei espliciti. Il limite resta quello del
 profilo, fino a 20°/s: non aumenta automaticamente la corrente del driver.
 **Applica a tutti** sostituisce le sei velocità con il valore comune.
 
@@ -189,6 +189,7 @@ profilo, fino a 20°/s: non aumenta automaticamente la corrente del driver.
 la tenuta e interrompe la sequenza. Se quel giunto è già fermo, non arresta un
 altro asse. Lo STOP globale/Esc rimane disponibile per interrompere il movimento
 corrente. Dopo un arresto HOME deve essere ristabilita; nessuna ripresa automatica.
+Nei gruppi simultanei STOP Jn arresta tutto il gruppo se Jn ne fa parte.
 Sono comandi software, non un arresto di emergenza hardware certificato.
 
 Togliere la spunta a un giunto lo esclude dai comandi e, con il nuovo firmware,
@@ -215,3 +216,29 @@ regolabile trascinando il separatore. Gli appunti sono salvati automaticamente
 nelle preferenze locali dell'app; non sono inclusi nei progetti esportati né
 inviati all'assistente IA. Le prove della versione sono eseguite in anteprima,
 con seriale simulata e compilazione del firmware, senza movimento fisico.
+
+## Build 27: simultaneo e voce
+
+Consulta [la guida dei movimenti simultanei e vocali](MULTI_VOICE.md).
+
+## Build 29: spazio centrale e tema chiaro
+
+I pannelli centrali seguono la larghezza disponibile quando apri, chiudi o ridimensioni
+le barre laterali. I controlli vanno su più righe negli spazi stretti; nei moduli
+avanzati molto larghi lo scorrimento resta locale al pannello. Le altezze manuali
+non creano più vuoti quando il contenuto si riduce. Il tema chiaro usa lo stesso
+verde acceso del tema scuro, bordi dei pulsanti interni e continui, testi secondari
+più scuri e didascalie leggermente più grandi. Nessuna modifica al firmware o ai
+parametri di movimento.
+
+La griglia dei limiti occupa solo l’altezza del contenuto e distribuisce i sei canali
+su una, due o tre righe secondo la larghezza. I selettori nativi (tema, modalità,
+porta e predefiniti) usano testo scuro leggibile in modalità chiara.
+
+## Build 30: conferma velocità dei giunti
+
+Le velocità applicate mantengono due decimali e la conferma con Invio o ✓ aggiorna
+sempre lo stato del campo, anche se il valore non cambia. I movimenti simultanei
+successivi non richiedono di confermare nuovamente velocità già applicate. Una
+modifica ancora non confermata continua a bloccare il gruppo. Nessuna modifica
+al firmware, alle accelerazioni o al calcolo dei movimenti.

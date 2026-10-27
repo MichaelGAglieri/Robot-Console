@@ -39,13 +39,14 @@ enum RobotTheme {
  private static func rgb(_ red:CGFloat,_ green:CGFloat,_ blue:CGFloat)->NSColor {
   NSColor(srgbRed:red,green:green,blue:blue,alpha:1)
  }
- // Dark green keeps lime accents readable on the light surfaces.
- static let lime = adaptive(light:rgb(0.20,0.36,0.035),dark:rgb(0.66,1.0,0.16))
+ // Bright lime accents are shared; text uses adaptive high-contrast ink.
+ static let lime = Color(red:0.66,green:1.0,blue:0.16)
+ static let accentText = adaptive(light:rgb(0.12,0.14,0.12),dark:rgb(0.66,1.0,0.16))
  static let black = adaptive(light:rgb(0.94,0.96,0.925),dark:rgb(0.035,0.043,0.035))
  static let graphite = adaptive(light:rgb(0.995,1.0,0.985),dark:rgb(0.10,0.115,0.095))
  static let surface = adaptive(light:rgb(0.975,0.985,0.96),dark:rgb(0.065,0.077,0.060))
  static let text = adaptive(light:rgb(0.10,0.135,0.085),dark:rgb(0.94,0.96,0.91))
- static let secondary = adaptive(light:rgb(0.36,0.40,0.34),dark:rgb(0.65,0.69,0.62))
+ static let secondary = adaptive(light:rgb(0.28,0.31,0.28),dark:rgb(0.65,0.69,0.62))
  static let stop = adaptive(light:rgb(0.75,0.14,0.10),dark:rgb(1.0,0.34,0.31))
  static let onStop = adaptive(light:.white,dark:rgb(0.035,0.043,0.035))
  // Filled lime buttons retain the robot's bright green in both appearances.
@@ -65,3 +66,15 @@ struct AppearancePicker:View {
   .help("Chiara, Scura oppure Sistema per seguire automaticamente l’aspetto di macOS")
  }
 }
+
+// The central viewport supplies a finite width to every panel, even inside scrolling.
+private struct PanelWidthKey:EnvironmentKey {static let defaultValue:CGFloat=1000}
+extension EnvironmentValues {var panelWidth:CGFloat {get{self[PanelWidthKey.self]}set{self[PanelWidthKey.self]=newValue}}}
+private struct ReadableCaption:ViewModifier {
+ @Environment(\.colorScheme) var scheme
+ var small:Bool;var mono:Bool
+ func body(content:Content)->some View {
+  content.font(.system(size:scheme == .light ? (small ? 12 : 13) : (small ? 11 : 12),weight:scheme == .light ? .medium : .regular,design:mono ? .monospaced : .default))
+ }
+}
+extension View {func robotCaption(small:Bool=false,mono:Bool=false)->some View {modifier(ReadableCaption(small:small,mono:mono))}}

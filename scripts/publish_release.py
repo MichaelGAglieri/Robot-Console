@@ -21,7 +21,7 @@ except urllib.error.HTTPError as error:
  if error.code!=404:raise
  release=None
 if release and not release['draft']:raise SystemExit('Version already published; refusing to overwrite it.')
-notes=(root/'docs/RELEASE_2_0.md').read_text()
+notes=(root/'docs'/('RELEASE_'+version.replace('.','_')+'.md')).read_text()
 if not release:release=request('POST',base+'/releases',dict(tag_name='v'+version,target_commitish=commit,name='Robot Console '+version+' · Studio',body=notes,draft=True,prerelease=False))
 assets=root/'build/release';expected=[f'Robot-Console-{version}-macOS-AppleSilicon.zip',f'Robot-Console-{version}-sources.zip','SHA256SUMS.txt'];assert all((assets/name).is_file() for name in expected)
 for existing in release.get('assets',[]):

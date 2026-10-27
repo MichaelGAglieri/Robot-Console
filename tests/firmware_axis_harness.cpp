@@ -23,7 +23,8 @@ std::vector<std::pair<int,int>> writes;
 void digitalWrite(byte p,int v){assert(p!=255);writes.push_back({p,v});}
 void pinMode(byte,int){}
 void delayMicroseconds(int){}
-unsigned long millis(){return 1;}
+unsigned long fakeMillis=1;
+unsigned long millis(){return fakeMillis;}
 struct FakeSerial {
  std::ostringstream out;
  void begin(int){}
@@ -62,5 +63,25 @@ int main(){
  writes.clear();bool old=axisAllowed[2];cmd("mask 11111z");cmd("off 0");cmd("off 7");cmd("off 11");
  assert(axisAllowed[2]==old && writes.empty()); // Validate entire command before GPIO writes.
  for(auto w:writes)assert(w.first!=255);
+ // New group is validated atomically, starts multiple targets and restores single-axis acceleration.
+ cmd("mask 111111");cmd("multi 10 20 -20 10 0 5 0 5 0 5 0 5");
+ assert(multiMoving && movingMask==3);
+ assert(motors[0]->distanceToGo()>0 && motors[1]->distanceToGo()<0);
+ assert(std::abs(motors[0]->maxSpeed*2-motors[1]->maxSpeed)<1);
+ assert(motors[0]->maxSpeed+motors[1]->maxSpeed<=2000.1f);
+ assert(std::abs(motors[0]->acceleration*2-motors[1]->acceleration)<2);
+ cmd("j3 10");assert(motors[2]->distanceToGo()==0); // Busy cannot append/start another move.
+ holdStop();assert(!multiMoving && !movingMask);
+ assert(!motors[0]->distanceToGo() && !motors[1]->distanceToGo());
+ writes.clear();cmd("multi 10 5 20 5 0 5 0 5 0 5 1 5"); // Unconfigured J6: no partial start.
+ assert(movingAxis==-1 && writes.empty());
+ cmd("multi 10 5 20 0 0 5 0 5 0 5 0 5");assert(movingAxis==-1 && writes.empty());
+ cmd("multi 10 5 20 5 0 5 0 5 0 5 0 5 extra");assert(movingAxis==-1 && writes.empty());
+ cmd("mask 101111");writes.clear();cmd("multi 10 5 20 5 0 5 0 5 0 5 0 5");assert(movingAxis==-1 && writes.empty());
+ cmd("mask 111111");cmd("multi 10 5 20 5 0 5 0 5 0 5 0 5");loop();
+ assert(movingAxis==-1 && !multiMoving);assert(Serial.out.str().find("MULTI DONE:")!=std::string::npos);
+ cmd("multi 10 5 20 5 0 5 0 5 0 5 0 5");fakeMillis=2000;loop();
+ assert(!linked && movingAxis==-1 && !multiMoving && !motors[1]->distanceToGo());
+ linked=true;cmd("j1 10");assert(motors[0]->acceleration==pulsesPerOutputRev[0]*OUTPUT_ACCELERATION/360.0f);
  std::cout<<"PASS: mask/ARM, disabled move, re-enable, active OFF, J2 isolation, invalid inputs\n";
 }

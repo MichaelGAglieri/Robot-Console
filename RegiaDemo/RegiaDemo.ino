@@ -98,19 +98,24 @@ void printDrives() {
 }
 void printAxisFeatures() {
   Serial.println(F("FEATURES AXIS_ENABLE"));
+  Serial.println(F("FEATURES MULTI_AXIS_V1"));
   Serial.print(F("DRIVE_CAPS "));
   for(byte i=0;i<AXES;++i) Serial.print(managedEnable(i) ? '1' : '0');
   Serial.println(); printDrives();
 }
 int8_t movingAxis = -1;
-char commandBuffer[40];
+bool multiMoving=false;
+byte movingMask=0;
+// Conservative aggregate ceiling, not a measured sustainable frequency.
+const float MULTI_PULSE_BUDGET=2000.0f;
+char commandBuffer[160];
 byte commandLength = 0;
 bool discardLine = false;
 unsigned long lastHeartbeat = 0;
 bool linked = false;
 void holdStop() {
   for(byte i=0;i<AXES;++i) motors[i]->setCurrentPosition(0);
-  movingAxis=-1;
+  movingAxis=-1;multiMoving=false;movingMask=0;
   commandLength=0; discardLine=false;
   // Mantiene ENABLE e PWM servo: stop impulsi, nessun rilascio del carico.
   Serial.println(F("HALTED"));
@@ -130,11 +135,12 @@ void stopAll() {
     digitalWrite(STEP_PINS[i], (i==DM542_AXIS && DM542_INVERT_STEP) ? HIGH : LOW);
     enabled[i] = false;
   }
-  movingAxis = -1;
+  movingAxis = -1;multiMoving=false;movingMask=0;
   Serial.println(F("STOP: stepper fermi, A4988 OFF, segnale servo OFF. DM542: ENA non gestito, coppia possibile."));
 }
 void printStatus() {
   Serial.print(F("SPEED "));Serial.println(MAX_OUTPUT_SPEED,2);
+  if (multiMoving) {Serial.println(F("MULTI RUNNING"));return;}
   if (movingAxis >= 0) {
     printAxis(movingAxis);
     Serial.print(F(" IN MOTO; impulsi residui = "));
@@ -156,7 +162,7 @@ void printHelp() {
   Serial.println(F("j1=X; j2=DM542 STEP60 DIR61; j3=Z; j4=E0; j5=E1."));
   Serial.println(F("j1 180 oppure j2 -180: gradi relativi all'uscita riduttore."));
   Serial.println(F("Da -360 a +360 per comando; massimo due decimali, punto decimale."));
-  Serial.println(F("Un comando e Invio, 115200 baud, Nuova riga. Un asse alla volta."));
+  Serial.println(F("Un comando e Invio, 115200 baud, Nuova riga. multi: avvio simultaneo, velocita indipendenti."));
   Serial.println(F("apri=1944 us; chiudi=1150 us; servo D11/Timer1, OFF all'avvio."));
   Serial.println(F("Durante un moto stepper, apri/chiudi sono rifiutati. Nessuna coda."));
   Serial.println(F("Attendi DONE. x=STOP/A4988 OFF/segnale servo OFF; p=stato; h=aiuto."));
@@ -219,12 +225,48 @@ void moveAxis(byte axis, int32_t centidegrees) {
     enabled[axis]=true;
   }
   delayMicroseconds(5);
+  motors[axis]->setMaxSpeed(pulsesPerOutputRev[axis]*MAX_OUTPUT_SPEED/360.0f);
+  motors[axis]->setAcceleration(pulsesPerOutputRev[axis]*OUTPUT_ACCELERATION/360.0f);
   motors[axis]->move(pulses);
   movingAxis=axis;
   printAxis(axis);
   Serial.print(F(" ACK; gradi uscita relativi = "));
   Serial.print(centidegrees/100.0f, 2);
   Serial.print(F("; impulsi richiesti = ")); Serial.println(pulses);
+}
+// One bounded atomic packet: six (relative angle, speed) pairs. No queue.
+void moveMultiple(char *text) {
+  if(movingAxis>=0) {Serial.println(F("ERROR BUSY"));return;}
+  int32_t angles[AXES],speeds[AXES];long pulses[AXES];float totalPulses=0,pathSpeed=1e9f,pathAcceleration=1e9f;byte mask=0;
+  char *token=strtok(text," \t");
+  for(byte i=0;i<AXES;++i) {
+    if(!token || !parseAngle(token,angles[i])) {Serial.println(F("ERROR MULTI ANGLE"));return;}
+    token=strtok(NULL," \t");
+    if(!token || !parseAngle(token,speeds[i]) || speeds[i]<100 || speeds[i]>2000) {Serial.println(F("ERROR MULTI SPEED"));return;}
+    token=strtok(NULL," \t");
+    pulses[i]=angleToPulses(i,angles[i]);
+    if(angles[i] && (!axisAllowed[i] || (i==5 && !J6_CONFIGURED))) {Serial.println(F("ERROR MULTI AXIS"));return;}
+    if(angles[i] && !pulses[i]) {Serial.println(F("ERROR MULTI RESOLUTION"));return;}
+    if(pulses[i]) {
+      mask|=(1<<i);totalPulses+=labs(pulses[i]);
+      float distance=fabs(angles[i]/100.0f);
+      pathSpeed=fminf(pathSpeed,(speeds[i]/100.0f)/distance);
+      pathAcceleration=fminf(pathAcceleration,OUTPUT_ACCELERATION/distance);
+    }
+  }
+  if(token || !mask) {Serial.println(F("ERROR MULTI FORMAT"));return;}
+  pathSpeed=fminf(pathSpeed,MULTI_PULSE_BUDGET/totalPulses);
+  // Complete all validation before touching targets or ENABLEs.
+  for(byte i=0;i<AXES;++i) if(mask & (1<<i)) {
+    motors[i]->setCurrentPosition(0);
+    motors[i]->setMaxSpeed(labs(pulses[i])*pathSpeed);
+    motors[i]->setAcceleration(labs(pulses[i])*pathAcceleration);
+    if(managedEnable(i)) {digitalWrite(ENABLE_PINS[i],LOW);enabled[i]=true;}
+    motors[i]->move(pulses[i]);
+  }
+  delayMicroseconds(5);
+  movingMask=mask;multiMoving=true;movingAxis=0;
+  Serial.println(F("MULTI ACK"));
 }
 void executeCommand(char *text) {
   while (isSpace(*text)) ++text;
@@ -254,6 +296,7 @@ void executeCommand(char *text) {
     }
     printDrives();return;
   }
+  if (!strncmp(text,"multi ",6)) {moveMultiple(text+6);return;}
   if (!strncmp(text,"speed ",6)) {
     if (movingAxis>=0) {Serial.println(F("ERROR BUSY"));return;}
     int32_t value;
@@ -356,6 +399,14 @@ void loop() {
     linked=false; holdStop(); Serial.println(F("ERROR WATCHDOG"));
   }
   if (movingAxis<0) return;
+  if(multiMoving) {
+    bool pending=false;
+    for(byte i=0;i<AXES;++i) if(movingMask & (1<<i)) {
+      motors[i]->run();if(motors[i]->distanceToGo()) pending=true;
+    }
+    if(!pending) {multiMoving=false;movingMask=0;movingAxis=-1;Serial.println(F("MULTI DONE: impulsi completati; nessun feedback fisico."));}
+    return;
+  }
   const byte axis=movingAxis;
   motors[axis]->run();
   if (!motors[axis]->distanceToGo()) {

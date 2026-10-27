@@ -16,7 +16,7 @@ jobs:
       - run: zsh native/build.command
       - run: codesign --verify --deep --strict "Robot Console.app"
   release:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, 'Release Robot Console 2.0.0')
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, 'Release Robot Console ')
     needs: macos
     runs-on: macos-latest
     permissions:

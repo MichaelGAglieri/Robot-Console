@@ -1,5 +1,39 @@
 # Changelog
 
+## 2.0.1
+
+Published update incorporating local builds 27–30: simultaneous joint groups and confirmed voice commands, responsive sidebars and model HOME preview, light-theme improvements, and corrected joint-speed acknowledgement. See [release notes](docs/RELEASE_2_0_1.md).
+
+## Local build 30 (unreleased)
+
+- Fix stale edited-speed warnings after acknowledging joint speeds: reconcile explicitly even when the displayed value does not change.
+- Preserve two decimal places from the controller instead of rounding applied speeds to tenths; observe each joint speed independently.
+- Verified in hardware-blocked preview: reproduce the old 1.25 to 1.2 mismatch, confirm decimal speed, perform two successive groups, and check that only unapplied edits block execution.
+- No firmware or motion-planning changes.
+
+## Local build 29 (unreleased)
+
+- Responsive central panels and adaptive joint/3D layouts for open or hidden sidebars.
+- Continuous inset button outlines, shared bright lime accents and larger high-contrast captions in light mode.
+- Compact eager limits grid avoids oversized scrolling regions; native selectors use readable text in light mode.
+- Presentation-only changes; firmware and motion settings unchanged.
+
+## Local build 28 (unreleased)
+
+- Flexible larger 3D pane and visual model-HOME editor, with pure preview, explicit save, project recovery copy and no hardware-zero changes.
+
+- Left robot activity sidebar with timestamped session events, right operator notes and independent persistent visibility controls.
+
+- Single and simultaneous motion share one set of joint cards and speed controls.
+- Read-only group speed/duration preview, applied-speed gating, and stale-summary rejection; voice readback includes estimated joint speed peaks.
+- MULTI_AXIS_V1 firmware unchanged from build 27.
+
+## Local build 27 (unreleased)
+
+- Explicit simultaneous joint groups, shared acceleration profile and bounded aggregate pulse rate; preserves grouped taught routes.
+- Local Italian/English motion dictation with spoken readback and single-use spoken confirmation, plus individual pose execution.
+- Updated firmware required for groups; no automatic upload. Physical timing and acoustic recognition remain to be validated by the operator.
+
 ## 2.0.0
 
 - Add saved independent joint speeds, per-joint STOP and autosaved operator notes sidebar.
