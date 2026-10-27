@@ -51,3 +51,21 @@ import AVFoundation
   catch {stop();message=error.localizedDescription}
  }
 }
+
+// Motion speech is separate from chat dictation and never sends text to an LLM.
+@MainActor final class MotionSpeaker:NSObject,ObservableObject,AVSpeechSynthesizerDelegate {
+ private let synth=AVSpeechSynthesizer()
+ private var completion:(()->Void)?
+ private var active:AVSpeechUtterance?
+ override init(){super.init();synth.delegate=self}
+ func stop(){completion=nil;active=nil;synth.stopSpeaking(at:.immediate)}
+ func speak(_ text:String,finished:@escaping ()->Void){
+  stop();completion=finished
+  let utterance=AVSpeechUtterance(string:text)
+  utterance.voice=AVSpeechSynthesisVoice(language:AppLanguage.current == .english ? "en-US" : "it-IT")
+  active=utterance;synth.speak(utterance)
+ }
+ nonisolated func speechSynthesizer(_ synthesizer:AVSpeechSynthesizer,didFinish utterance:AVSpeechUtterance){
+  Task{@MainActor in guard self.active === utterance else{return};self.active=nil;let callback=self.completion;self.completion=nil;callback?()}
+ }
+}

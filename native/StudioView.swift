@@ -17,6 +17,7 @@ struct ArmJoint:Decodable,Identifiable {
  var rotary:Bool{kind != "prismatic"}
 }
 struct ArmModel:Decodable {let name:String;let root:String;let tip:String;let links:[ArmLink];let joints:[ArmJoint];let warnings:[String];let source_hash:String;let approximate:Bool?;let schematic:Bool?}
+struct HomePreview:Decodable {let frames:[ArmFrame];let tcp:[Double];let model_hash:String}
 struct ArmFrame:Decodable {let name:String;let matrix:[Double]}
 struct ArmCalibration:Decodable {let sign:Double;let offset:Double}
 struct WorkcellBox:Codable,Identifiable {var name:String;var center:[Double];var size:[Double];var id:String{name}}
@@ -62,16 +63,17 @@ extension Regia {
 
 // Camera gestures are local visualization only: no controller request is sent.
 final class OrbitSCNView:SCNView {
+ var userAdjusted=false
  var orbitTarget=SIMD3<Float>(0,0,0);private var distance:Float=1;private var yaw:Float=0;private var pitch:Float=0;private var previous=NSPoint.zero
  override var acceptsFirstResponder:Bool{true}
  override func acceptsFirstMouse(for event:NSEvent?)->Bool{true}
  func setOrbitTarget(_ target:SIMD3<Float>){orbitTarget=target;guard let camera=pointOfView else{return};let delta=camera.simdPosition-target;distance=max(0.08,simd_length(delta));yaw=atan2(delta.y,delta.x);pitch=asin(max(-1,min(1,delta.z/distance)))}
- func rotate(yaw delta:Float,pitch vertical:Float=0){yaw+=delta;pitch=max(-1.48,min(1.48,pitch+vertical));updateCamera()}
+ func rotate(yaw delta:Float,pitch vertical:Float=0){userAdjusted=true;yaw+=delta;pitch=max(-1.48,min(1.48,pitch+vertical));updateCamera()}
  private func updateCamera(){guard let camera=pointOfView else{return};camera.simdPosition=orbitTarget+SIMD3(cos(yaw)*cos(pitch),sin(yaw)*cos(pitch),sin(pitch))*distance;camera.look(at:SCNVector3(orbitTarget),up:SCNVector3(0,0,1),localFront:SCNVector3(0,0,-1))}
  override func mouseDown(with event:NSEvent){window?.makeFirstResponder(self);previous=convert(event.locationInWindow,from:nil)}
  override func mouseDragged(with event:NSEvent){let current=convert(event.locationInWindow,from:nil);rotate(yaw:Float(previous.x-current.x)*0.008,pitch:Float(previous.y-current.y)*0.008);previous=current}
- override func scrollWheel(with event:NSEvent){distance=max(0.08,min(30,distance*exp(Float(event.scrollingDeltaY)*0.015)));updateCamera()}
- override func magnify(with event:NSEvent){distance=max(0.08,min(30,distance*exp(-Float(event.magnification))));updateCamera()}
+ override func scrollWheel(with event:NSEvent){userAdjusted=true;distance=max(0.08,min(30,distance*exp(Float(event.scrollingDeltaY)*0.015)));updateCamera()}
+ override func magnify(with event:NSEvent){userAdjusted=true;distance=max(0.08,min(30,distance*exp(-Float(event.magnification))));updateCamera()}
 }
 
 struct ArmScene:NSViewRepresentable {
@@ -79,6 +81,7 @@ struct ArmScene:NSViewRepresentable {
  let camera:String
  let grip:String
  var orbitStep:Int=0
+ var homePreview:HomePreview?=nil
  @Environment(\.colorScheme) var colorScheme
  func makeCoordinator()->Coordinator{Coordinator()}
  func makeNSView(context:Context)->OrbitSCNView {
@@ -86,8 +89,9 @@ struct ArmScene:NSViewRepresentable {
   view.defaultCameraController.worldUp=SCNVector3(0,0,1);view.defaultCameraController.interactionMode = .orbitTurntable
   context.coordinator.setup(view);return view
  }
- func updateNSView(_ view:OrbitSCNView,context:Context){context.coordinator.update(view,studio,camera,colorScheme,grip,orbitStep)}
+ func updateNSView(_ view:OrbitSCNView,context:Context){context.coordinator.update(view,studio,camera,colorScheme,grip,orbitStep,homePreview)}
  final class Coordinator {
+  var viewport=CGSize.zero
   var lastOrbitStep=0;var key="";var nodes:[String:SCNNode]=[:];var ghosts:[String:SCNNode]=[:];var jaws:[SCNNode]=[];var cameraNode=SCNNode();var objects=SCNNode();var jointGuide=SCNNode();var marker=SCNNode();var cameraPreset="";var path=SCNNode();var points:[SCNVector3]=[]
   func setup(_ view:SCNView){
    guard let scene=view.scene else{return}
@@ -133,7 +137,7 @@ struct ArmScene:NSViewRepresentable {
    let m=material(v.color);node.enumerateChildNodes{child,_ in if child.geometry != nil {child.geometry=child.geometry?.copy() as? SCNGeometry;child.geometry?.materials=[m]}}
    node.geometry?.materials=[m];return node
   }
-  func update(_ view:SCNView,_ state:StudioState,_ preset:String,_ scheme:ColorScheme,_ grip:String,_ orbitStep:Int){
+  func update(_ view:SCNView,_ state:StudioState,_ preset:String,_ scheme:ColorScheme,_ grip:String,_ orbitStep:Int,_ home:HomePreview?){
    guard let scene=view.scene else{return}
    view.backgroundColor=scheme == .dark ? NSColor(srgbRed:0.045,green:0.06,blue:0.04,alpha:1) : NSColor(srgbRed:0.91,green:0.94,blue:0.90,alpha:1)
    let newKey=state.model.source_hash+state.model.links.flatMap{$0.visuals.map{$0.mesh}}.joined()
@@ -142,7 +146,7 @@ struct ArmScene:NSViewRepresentable {
     for link in state.model.links {
      let node=SCNNode();node.name=link.name
      for visual in link.visuals{node.addChildNode(geometry(visual))}
-     let axis=SCNNode(geometry:SCNSphere(radius:0.007));axis.name="jointMarker";axis.geometry?.firstMaterial?.diffuse.contents=NSColor.gray;node.addChildNode(axis)
+     if state.model.joints.contains(where:{$0.child==link.name && $0.kind != "fixed" && $0.mimic.isEmpty}) {let axis=SCNNode(geometry:SCNSphere(radius:0.007));axis.name="jointMarker";axis.geometry?.firstMaterial?.diffuse.contents=NSColor.gray;node.addChildNode(axis)}
      nodes[link.name]=node;scene.rootNode.addChildNode(node)
      let ghost=node.clone();ghost.enumerateChildNodes{child,_ in if let geometry=child.geometry{child.geometry=geometry.copy() as? SCNGeometry;let mat=SCNMaterial();mat.diffuse.contents=NSColor.systemGray.withAlphaComponent(0.35);mat.fillMode = .lines;child.geometry?.materials=[mat]}}
      ghosts[link.name]=ghost;scene.rootNode.addChildNode(ghost)
@@ -151,16 +155,17 @@ struct ArmScene:NSViewRepresentable {
    if state.model.schematic == true,jaws.isEmpty,let hand=nodes[state.model.tip] {
     for _ in 0..<3 {let jaw=SCNNode(geometry:SCNBox(width:0.014,height:0.014,length:0.065,chamferRadius:0.002));jaw.geometry?.firstMaterial?.diffuse.contents=NSColor(srgbRed:0.66,green:1,blue:0.16,alpha:1);hand.addChildNode(jaw);jaws.append(jaw)}
    }
+   let shownFrames=home?.frames ?? state.frames
    SCNTransaction.begin();SCNTransaction.animationDuration = 0.28
    for (i,jaw) in jaws.enumerated(){let angle=Double(i)*2*Double.pi/3;let radius=grip=="chiudi" ? 0.012 : 0.04;jaw.position=SCNVector3(cos(angle)*radius,sin(angle)*radius,0.13)}
-   for frame in state.live_frames where frame.matrix.count==16{ghosts[frame.name]?.simdTransform=transform(frame.matrix);ghosts[frame.name]?.isHidden=state.follow}
-   for f in state.frames where f.matrix.count==16{nodes[f.name]?.simdTransform=transform(f.matrix)}
+   for frame in state.live_frames where frame.matrix.count==16{ghosts[frame.name]?.simdTransform=transform(frame.matrix);ghosts[frame.name]?.isHidden=state.follow || home != nil}
+   for f in shownFrames where f.matrix.count==16{nodes[f.name]?.simdTransform=transform(f.matrix)}
    for j in state.model.joints {
     let m=nodes[j.child]?.childNode(withName:"jointMarker",recursively:false)
     m?.geometry?.firstMaterial?.diffuse.contents=j.name == state.selected ? NSColor.systemCyan : NSColor.gray;m?.scale=j.name == state.selected ? SCNVector3(1.8,1.8,1.8) : SCNVector3(1,1,1)
    }
    jointGuide.childNodes.forEach{$0.removeFromParentNode()}
-   if let j=state.model.joints.first(where:{$0.name==state.selected}),let f=state.frames.first(where:{$0.name==j.child}) {
+   if let j=state.model.joints.first(where:{$0.name==state.selected}),let f=shownFrames.first(where:{$0.name==j.child}) {
     jointGuide.simdTransform=transform(f.matrix)
     let axis=simd_normalize(SIMD3(Float(j.axis[0]),Float(j.axis[1]),Float(j.axis[2])))
     let tip=axis*0.10;let guide=lines([SCNVector3(-tip),SCNVector3(tip)],.systemCyan);jointGuide.addChildNode(guide)
@@ -171,7 +176,8 @@ struct ArmScene:NSViewRepresentable {
      jointGuide.addChildNode(lines(arc,.systemOrange))
     }
    }
-   marker.position=SCNVector3(state.tcp[0],state.tcp[1],state.tcp[2]);SCNTransaction.commit()
+   let shownTCP=home?.tcp ?? state.tcp
+   marker.position=SCNVector3(shownTCP[0],shownTCP[1],shownTCP[2]);SCNTransaction.commit()
    let point=marker.position
    if points.last.map({hypot(hypot($0.x-point.x,$0.y-point.y),$0.z-point.z)>0.005}) ?? true {
     points.append(point);points=Array(points.suffix(80));path.childNodes.forEach{$0.removeFromParentNode()}
@@ -182,8 +188,12 @@ struct ArmScene:NSViewRepresentable {
     let node=SCNNode(geometry:SCNBox(width:box.size[0],height:box.size[1],length:box.size[2],chamferRadius:0));node.position=SCNVector3(box.center[0],box.center[1],box.center[2]);node.geometry?.firstMaterial?.diffuse.contents=NSColor.systemOrange.withAlphaComponent(0.35);objects.addChildNode(node)
    }
    if orbitStep != lastOrbitStep{(view as? OrbitSCNView)?.rotate(yaw:Float(orbitStep-lastOrbitStep)*Float.pi/12);lastOrbitStep=orbitStep}
-   if cameraPreset != preset {
+   let validViewport=view.bounds.width>10 && view.bounds.height>10
+   let resized=abs(view.bounds.width-viewport.width)>2 || abs(view.bounds.height-viewport.height)>2
+   let userAdjusted=(view as? OrbitSCNView)?.userAdjusted ?? false
+   if validViewport && (cameraPreset != preset || (resized && !userAdjusted)) {
     cameraPreset=preset
+    (view as? OrbitSCNView)?.userAdjusted=false
     var corners:[SIMD3<Float>]=[]
     for node in nodes.values{let box=node.boundingBox;for x in [box.min.x,box.max.x]{for y in [box.min.y,box.max.y]{for z in [box.min.z,box.max.z]{corners.append(node.simdConvertPosition(SIMD3(Float(x),Float(y),Float(z)),to:nil))}}}}
     let minimum=SIMD3(corners.map{$0.x}.min() ?? -0.2,corners.map{$0.y}.min() ?? -0.2,corners.map{$0.z}.min() ?? 0)
@@ -194,6 +204,7 @@ struct ArmScene:NSViewRepresentable {
     cameraNode.camera?.fieldOfView=45;cameraNode.simdPosition=center+simd_normalize(direction)*distance
     cameraNode.look(at:SCNVector3(center),up:SCNVector3(0,0,1),localFront:SCNVector3(0,0,-1));view.defaultCameraController.target=SCNVector3(center);(view as? OrbitSCNView)?.setOrbitTarget(center)
    }
+   if validViewport {viewport=view.bounds.size}
   }
  }
 }
@@ -203,19 +214,78 @@ struct ArmMiniView:View {
  @State private var camera="perspective"
  @State private var fit=0
  @State private var rotation=0
+ @State private var showHome=false
  var body:some View {
   VStack(alignment:.leading,spacing:8){
-   HStack{RText("Anteprima 3D").font(.headline).lineLimit(1);Spacer();if let s=m.studio{Toggle("Segui comandi",isOn:Binding(get:{s.follow},set:{m.send("studio_follow",["enabled":$0])})).toggleStyle(.switch).controlSize(.small).font(.caption).fixedSize()}}
+   HStack{RText("Anteprima 3D").font(.headline).lineLimit(1);Spacer();if let s=m.studio{Toggle("Segui comandi",isOn:Binding(get:{s.follow},set:{m.send("studio_follow",["enabled":$0])})).toggleStyle(.switch).controlSize(.small).robotCaption().fixedSize()}}
+   HStack{Button("HOME del modello…"){showHome=true}.disabled(m.state.connected || !m.idle || m.firmware.busy);Spacer()}
+   if m.state.connected {RText("Scollega il controllo per allineare la HOME del modello.").robotCaption(small:true).foregroundStyle(RobotTheme.secondary)}
    HStack{Button("Adatta vista"){fit+=1}.fixedSize();Button("↺"){rotation-=1}.help("Ruota a sinistra");Button("↻"){rotation+=1}.help("Ruota a destra");Spacer()}
    if let s=m.studio {
-    ArmScene(studio:s,camera:camera+"#"+String(fit),grip:m.state.grip,orbitStep:rotation).clipShape(RoundedRectangle(cornerRadius:12)).frame(minHeight:220)
-    RText("Trascina per ruotare · rotella o pizzico per zoom").font(.caption2).foregroundStyle(RobotTheme.secondary)
+    RText("\(s.movable.count) giunti mobili nel modello").robotCaption().foregroundStyle(RobotTheme.accentText)
+    ArmScene(studio:s,camera:camera+"#"+String(fit),grip:m.state.grip,orbitStep:rotation).clipShape(RoundedRectangle(cornerRadius:12)).frame(minHeight:340,maxHeight:.infinity)
+    RText("Trascina per ruotare · rotella o pizzico per zoom").robotCaption(small:true).foregroundStyle(RobotTheme.secondary)
     Picker("Vista",selection:$camera){RText("3D").tag("perspective");RText("Fronte").tag("front");RText("Lato").tag("side");RText("Alto").tag("top")}.pickerStyle(.segmented)
-    RText(s.follow ? "Animazione stimata dai comandi · senza feedback fisico" : "Target virtuale · il robot non viene mosso").font(.caption2).foregroundStyle(RobotTheme.secondary)
+    RText(s.follow ? "Animazione stimata dai comandi · senza feedback fisico" : "Target virtuale · il robot non viene mosso").robotCaption(small:true).foregroundStyle(RobotTheme.secondary)
     RText("TCP: X \(s.tcp[0]*1000,specifier:"%.1f") · Y \(s.tcp[1]*1000,specifier:"%.1f") · Z \(s.tcp[2]*1000,specifier:"%.1f") mm").font(.caption.monospacedDigit())
-    if !s.collisions.isEmpty{RText("Interferenza geometrica: "+s.collisions.joined(separator:", ")).font(.caption).foregroundStyle(RobotTheme.stop)}
+    if !s.collisions.isEmpty{RText("Interferenza geometrica: "+s.collisions.joined(separator:", ")).robotCaption().foregroundStyle(RobotTheme.stop)}
    }else{ProgressView("Caricamento modello…").frame(height:250)}
   }.padding(12).background(RobotTheme.surface,in:RoundedRectangle(cornerRadius:14))
+   .sheet(isPresented:$showHome){ModelHomeEditor(m:m)}
+ }
+}
+
+struct ModelHomeEditor:View {
+ @ObservedObject var m:Regia
+ @Environment(\.dismiss) private var dismiss
+ @State private var offsets:[String:Double]=[:]
+ @State private var source=""
+ @State private var fit=0
+ @State private var camera="perspective"
+ @State private var pending:DispatchWorkItem?
+ @State private var session=UUID()
+ func refresh(){
+  pending?.cancel();m.homeRevision+=1;m.homePreview=nil
+  let revision=m.homeRevision;let values=offsets;let hash=source
+  let work=DispatchWorkItem{m.send("studio_home_preview",["offsets":values,"model_hash":hash,"revision":revision])}
+  pending=work;DispatchQueue.main.asyncAfter(deadline:.now()+0.12,execute:work)
+ }
+ var body:some View {
+  VStack(alignment:.leading,spacing:14) {
+   HStack{RText("Allinea HOME del modello").font(.title2.bold());Spacer();Button{dismiss()}label:{RText("Annulla")}}
+   RText("Regola i giunti finché il modello assomiglia al braccio reale nella sua HOME. Sono offset del modello a zero comandato: non muovono i motori e non misurano la calibrazione.").font(.callout).foregroundStyle(RobotTheme.secondary)
+   if let s=m.studio {
+    HStack(alignment:.top,spacing:16) {
+     VStack {
+      ArmScene(studio:s,camera:camera+"#"+String(fit),grip:m.state.grip,homePreview:m.homePreview).clipShape(RoundedRectangle(cornerRadius:12)).frame(minHeight:440,maxHeight:.infinity)
+      HStack{Button{fit+=1}label:{RText("Adatta vista")};Picker("Vista",selection:$camera){RText("3D").tag("perspective");RText("Fronte").tag("front");RText("Lato").tag("side");RText("Alto").tag("top")}.pickerStyle(.segmented)}
+      RText("Trascina per ruotare · rotella o pizzico per zoom").robotCaption()
+     }.frame(maxWidth:.infinity)
+     ScrollView {
+      VStack(alignment:.leading,spacing:18) {
+       ForEach(s.movable){joint in
+        let multiplier=joint.rotary ? 180 / Double.pi : 1000.0
+        VStack(alignment:.leading,spacing:6) {
+         RText(joint.name).font(.subheadline.bold())
+         HStack{TextField("HOME",value:Binding(get:{(offsets[joint.name] ?? 0)*multiplier},set:{offsets[joint.name]=max(joint.lower,min(joint.upper,$0/multiplier))}),format:.number.precision(.fractionLength(1))).accessibilityLabel(T("HOME modello ")+joint.name);RText(joint.rotary ? "°" : "mm")}
+         Slider(value:Binding(get:{offsets[joint.name] ?? 0},set:{offsets[joint.name]=$0}),in:joint.lower...max(joint.lower+0.000001,joint.upper)).accessibilityLabel(T("HOME modello ")+joint.name)
+        }
+       }
+      }.padding(4)
+     }.frame(width:240)
+    }
+    HStack {
+     Button{offsets=s.calibration.mapValues{$0.offset}}label:{RText("Ripristina valori iniziali")}
+     Spacer()
+     Button {
+      m.send("studio_home_apply",["offsets":offsets,"model_hash":source,"confirmed":true]){ok in if ok {dismiss()}}
+     }label:{RText("Salva HOME del modello")}.buttonStyle(RobotButtonStyle(prominent:true)).disabled(m.state.connected || !m.idle || m.homePreview == nil)
+    }
+   }
+  }.padding(22).frame(width:980,height:720).background(RobotTheme.surface).foregroundStyle(RobotTheme.text)
+   .onAppear{if let s=m.studio {source=s.model.source_hash;offsets=s.calibration.mapValues{$0.offset};refresh()}}
+   .onChange(of:offsets){_,_ in refresh()}
+   .onDisappear{pending?.cancel();m.homeRevision+=1;m.homePreview=nil}
  }
 }
 
@@ -236,8 +306,8 @@ struct ArmJointRow:View {
      if !value && channel>=0 && m.state.mode=="robot" && m.state.connected && m.state.drive_caps?[channel]==true && m.state.drive_state?[channel] != false {m.send("axis_stop",["axis":channel]);confirmRelease=true}
      else {m.send("studio_joint",["joint":joint.name,"enabled":value])}
     })).toggleStyle(.checkbox).frame(minWidth:140,alignment:.leading).disabled((!m.idle && studio.enabled[joint.name]==false) || (m.state.connected && m.state.mode=="robot" && m.state.axis_control != true && (studio.mapping[joint.name] ?? -1)>=0))
-    Button("Evidenzia"){m.send("studio_select",["joint":joint.name])}.font(.caption)
-    RText(joint.kind).font(.caption).foregroundStyle(RobotTheme.secondary)
+    Button("Evidenzia"){m.send("studio_select",["joint":joint.name])}.robotCaption()
+    RText(joint.kind).robotCaption().foregroundStyle(RobotTheme.secondary)
     Spacer();RText("\(current*multiplier,specifier:"%.1f") \(joint.rotary ? "°" : "mm")").monospacedDigit()
     TextField("Target",text:$angle).frame(width:75)
     Button("Anteprima"){if let v=Double(angle.replacingOccurrences(of:",",with:".")){m.send("studio_preview",["joint":joint.name,"value":v/multiplier])}}.disabled(!(studio.enabled[joint.name] ?? true))
@@ -246,7 +316,7 @@ struct ArmJointRow:View {
    HStack {
     Picker("Motore",selection:$axis){RText("Solo modello").tag(-1);ForEach(0..<6,id:\.self){RText("J\($0+1)").tag($0)}}.frame(width:175)
     Picker("Verso",selection:$sign){RText("+1").tag(1.0);RText("−1").tag(-1.0)}.frame(width:125)
-    RText("Offset").font(.caption);TextField("Offset",text:$offset).frame(width:70);RText(joint.rotary ? "°" : "mm").font(.caption)
+    RText("Offset").robotCaption();TextField("Offset",text:$offset).frame(width:70);RText(joint.rotary ? "°" : "mm").robotCaption()
     Button("Applica mapping"){apply()}.disabled(m.state.connected || !m.idle)
    }
   }.padding(10).background(RobotTheme.black,in:RoundedRectangle(cornerRadius:10))
@@ -261,12 +331,12 @@ struct StudioSetupPanel:View {
  var body:some View {
   Panel(title:"Modello del braccio · URDF e calibrazione") {
    if let s=m.studio {
-    HStack {RText(s.model.name).font(.headline).foregroundStyle(RobotTheme.lime);Spacer();Button("Importa URDF…"){m.chooseURDF()}.disabled(!canConfigure);Button("Apri progetto…"){m.studioFile("studio_open")}.disabled(!canConfigure);Button("Esporta progetto…"){m.studioFile("studio_export")}.disabled(!canConfigure)}
-    RText(s.status).font(.caption).foregroundStyle(RobotTheme.secondary)
-    if s.model.schematic == true{RText("DOC schematico: geometria indicativa, non una calibrazione del robot fisico.").font(.caption).foregroundStyle(.orange)}
+    HStack {RText(s.model.name).font(.headline).foregroundStyle(RobotTheme.accentText);Spacer();Button("Importa URDF…"){m.chooseURDF()}.disabled(!canConfigure);Button("Apri progetto…"){m.studioFile("studio_open")}.disabled(!canConfigure);Button("Esporta progetto…"){m.studioFile("studio_export")}.disabled(!canConfigure)}
+    RText(s.status).robotCaption().foregroundStyle(RobotTheme.secondary)
+    if s.model.schematic == true{RText("DOC schematico: geometria indicativa, non una calibrazione del robot fisico.").robotCaption().foregroundStyle(.orange)}
     DisclosureGroup("Giunti, mapping hardware e TCP",isExpanded:$expanded){
      VStack(alignment:.leading,spacing:12){
-      RText("Escludere un giunto blocca i comandi e le sequenze che lo richiedono. Non disabilita elettricamente il driver. Per cambiare mapping o calibrazione scollega il controllo.").font(.caption).foregroundStyle(RobotTheme.secondary)
+      RText("Escludere un giunto blocca i comandi e le sequenze che lo richiedono. Non disabilita elettricamente il driver. Per cambiare mapping o calibrazione scollega il controllo.").robotCaption().foregroundStyle(RobotTheme.secondary)
       ForEach(s.movable){j in ArmJointRow(m:m,joint:j,studio:s)}
       HStack {TextField("Nome progetto",text:$projectName);Button("Salva progetto"){m.send("studio_save",["name":projectName])};Button("Carica DOC 5 DOF"){m.send("studio_default")}.disabled(!canConfigure)}
       HStack {
@@ -275,15 +345,15 @@ struct StudioSetupPanel:View {
        Button("Salva TCP"){if let a=Double(x),let b=Double(y),let c=Double(z){m.send("studio_tcp",["tip":tip,"tool":[a/1000,b/1000,c/1000]])}}.disabled(!canConfigure)
       }
       Toggle("Ho verificato fisicamente modello, mapping, versi e offset",isOn:Binding(get:{s.verified},set:{m.send("studio_verified",["confirmed":$0])})).disabled(!canConfigure)
-      if !s.model.warnings.isEmpty{RText(s.model.warnings.joined(separator:"\n")).font(.caption).foregroundStyle(.orange)}
+      if !s.model.warnings.isEmpty{RText(s.model.warnings.joined(separator:"\n")).robotCaption().foregroundStyle(.orange)}
      }.padding(.top,10)
     }
     DisclosureGroup("Target cartesiano e ambiente di lavoro"){
      VStack(alignment:.leading,spacing:10){
       HStack {RText("Target punta · mm");TextField("X",text:$ikX);TextField("Y",text:$ikY);TextField("Z",text:$ikZ);Button("Calcola anteprima IK"){if let a=Double(ikX),let b=Double(ikY),let c=Double(ikZ){m.send("studio_ik",["target":[a/1000,b/1000,c/1000]])}}}
-      RText("IK di posizione: l’orientamento non è imposto. La raggiungibilità dipende dai giunti e dal modello importato. Il calcolo aggiorna solo il modello.").font(.caption).foregroundStyle(RobotTheme.secondary)
+      RText("IK di posizione: l’orientamento non è imposto. La raggiungibilità dipende dai giunti e dal modello importato. Il calcolo aggiorna solo il modello.").robotCaption().foregroundStyle(RobotTheme.secondary)
       Button("Esegui target visualizzato…"){m.confirmStudioTarget=true}.buttonStyle(RobotButtonStyle(prominent:true)).disabled(!m.state.home || !m.idle || s.follow)
-      RText("Ostacoli: elenco JSON con name, center [x,y,z] e size [x,y,z] in metri. Controllo conservativo dei segmenti dei link; non è una certificazione di collisione.").font(.caption).foregroundStyle(RobotTheme.secondary)
+      RText("Ostacoli: elenco JSON con name, center [x,y,z] e size [x,y,z] in metri. Controllo conservativo dei segmenti dei link; non è una certificazione di collisione.").robotCaption().foregroundStyle(RobotTheme.secondary)
       TextEditor(text:$obstacleJSON).font(.system(size:12,design:.monospaced)).frame(height:100)
       Button("Applica ostacoli"){if let data=obstacleJSON.data(using:.utf8),let boxes=try? JSONSerialization.jsonObject(with:data){m.send("studio_obstacles",["boxes":boxes])}else{m.message="JSON ostacoli non valido."}}.disabled(!canConfigure)
      }
@@ -330,13 +400,13 @@ struct ProgramPanel:View {
       Button("Elimina"){var a=s.blocks;a.remove(at:i);m.blocks(a)}
      }.padding(8).background(s.program_index==i ? RobotTheme.lime.opacity(0.15) : RobotTheme.black,in:RoundedRectangle(cornerRadius:8)).disabled(s.program_running || !m.idle)
     }
-    HStack{Button("Esegui programma…"){m.confirmStudioProgram=true}.buttonStyle(RobotButtonStyle(prominent:true)).disabled(!m.state.home || !m.idle || s.blocks.isEmpty);Button("Interrompi programma"){m.send("studio_cancel")}.disabled(!s.program_running);Spacer();RText(s.program_running ? "In esecuzione" : "Da fermo").font(.caption)}
+    HStack{Button("Esegui programma…"){m.confirmStudioProgram=true}.buttonStyle(RobotButtonStyle(prominent:true)).disabled(!m.state.home || !m.idle || s.blocks.isEmpty);Button("Interrompi programma"){m.send("studio_cancel")}.disabled(!s.program_running);Spacer();RText(s.program_running ? "In esecuzione" : "Da fermo").robotCaption()}
     if !s.program_error.isEmpty{RText(s.program_error).foregroundStyle(RobotTheme.stop)}
     DisclosureGroup("Editor dei blocchi JSON") {
      TextEditor(text:$blockJSON).font(.system(size:12,design:.monospaced)).frame(height:180)
      HStack{Button("Rileggi blocchi"){let e=JSONEncoder();e.outputFormatting=[.prettyPrinted,.sortedKeys];if let d=try? e.encode(s.blocks){blockJSON=String(data:d,encoding:.utf8) ?? "[]"}};Button("Valida e salva blocchi"){if let d=blockJSON.data(using:.utf8),let b=try? JSONDecoder().decode([ProgramBlock].self,from:d){m.blocks(b)}else{m.message="Formato dei blocchi non valido."}}}.disabled(s.program_running || !m.idle)
     }
-    RText("Esecuzione tramite il controllore esistente, un asse alla volta, con controlli dei limiti e ritorno sul percorso registrato. Ripetizioni limitate; un sensore scaduto o mancante interrompe il programma.").font(.caption).foregroundStyle(RobotTheme.secondary)
+    RText("Esecuzione tramite il controllore esistente, un asse alla volta, con controlli dei limiti e ritorno sul percorso registrato. Ripetizioni limitate; un sensore scaduto o mancante interrompe il programma.").robotCaption().foregroundStyle(RobotTheme.secondary)
     if !m.state.sequence.isEmpty {
      Divider();HStack{RText("Anteprima pose");Picker("Tappa",selection:$previewPose){ForEach(Array(m.state.sequence.filter{$0.isEnabled}.enumerated()),id:\.offset){i,p in RText(p.name).tag(i)}};Slider(value:$fraction,in:0...1).onChange(of:fraction){_,v in m.send("studio_sequence",["index":previewPose,"fraction":v])};RText("\(fraction*100,specifier:"%.0f")%")}
     }
@@ -350,15 +420,15 @@ struct TelemetryPanel:View {
  var body:some View {
   Panel(title:"Diagnostica · registrazioni e sensori") {
    if let s=m.studio {
-    HStack {RText("Origine: "+(m.state.mode=="demo" ? "virtuale" : "impulsi comandati · senza encoder")).font(.caption);Spacer();Toggle("Registra sessione",isOn:Binding(get:{s.recording},set:{m.send("studio_record",["enabled":$0])}));RText("\(s.sample_count) campioni");Button("Esporta CSV…"){m.studioFile("studio_export_csv")}.disabled(s.sample_count==0)}
+    HStack {RText("Origine: "+(m.state.mode=="demo" ? "virtuale" : "impulsi comandati · senza encoder")).robotCaption();Spacer();Toggle("Registra sessione",isOn:Binding(get:{s.recording},set:{m.send("studio_record",["enabled":$0])}));RText("\(s.sample_count) campioni");Button("Esporta CSV…"){m.studioFile("studio_export_csv")}.disabled(s.sample_count==0)}
     if !s.telemetry.isEmpty {
      Chart {ForEach(Array(s.telemetry.enumerated()),id:\.offset){_,p in ForEach(0..<min(6,p.values.count),id:\.self){i in LineMark(x:.value("Tempo",Date(timeIntervalSince1970:p.time)),y:.value("Gradi",p.values[i])).foregroundStyle(by:.value("Giunto","J\(i+1)"))}}}.frame(height:150)
     }
     HStack {TextField("Nome ingresso",text:$sensorName);Picker("Tipo",selection:$sensorKind){ForEach(["digital","distance","force","encoder","temperature"],id:\.self){RText($0)}};Button("Definisci sensore"){m.send("studio_sensor_add",["name":sensorName,"kind":sensorKind])}}
     ForEach(s.sensors){sensor in
-     HStack {RText(sensor.name).bold();RText(sensor.kind).font(.caption);RText(sensor.valueText).monospacedDigit();RText(sensor.source).font(.caption).foregroundStyle(RobotTheme.secondary);Spacer();RText(sensor.age<0 ? "Nessun dato" : "\(sensor.age,specifier:"%.1f") s").font(.caption);if m.state.mode=="demo"{Button("Simula 0"){m.send("studio_sensor_value",["name":sensor.name,"value":0])};Button("Simula 1"){m.send("studio_sensor_value",["name":sensor.name,"value":1])}}}
+     HStack {RText(sensor.name).bold();RText(sensor.kind).robotCaption();RText(sensor.valueText).monospacedDigit();RText(sensor.source).robotCaption().foregroundStyle(RobotTheme.secondary);Spacer();RText(sensor.age<0 ? "Nessun dato" : "\(sensor.age,specifier:"%.1f") s").robotCaption();if m.state.mode=="demo"{Button("Simula 0"){m.send("studio_sensor_value",["name":sensor.name,"value":0])};Button("Simula 1"){m.send("studio_sensor_value",["name":sensor.name,"value":1])}}}
     }
-    RText("I dati sintetici sono marcati come simulati e non soddisfano attese di sensori sul robot reale. Gli encoder e gli altri sensori richiedono un adattatore connesso e dati aggiornati.").font(.caption).foregroundStyle(RobotTheme.secondary)
+    RText("I dati sintetici sono marcati come simulati e non soddisfano attese di sensori sul robot reale. Gli encoder e gli altri sensori richiedono un adattatore connesso e dati aggiornati.").robotCaption().foregroundStyle(RobotTheme.secondary)
    }
   }
  }

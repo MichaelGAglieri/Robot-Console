@@ -2,27 +2,58 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (c) 2026 Michael Giuseppe Aglieri
 """Local-only DOC presentation controller. No third-party Python dependencies."""
-import json, math, os, select, termios, threading, time, glob, secrets, fcntl, struct
+import hashlib, uuid, json, math, os, select, termios, threading, time, glob, secrets, fcntl, struct
 from pathlib import Path
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 ROOT=Path(__file__).resolve().parent
 DATA=Path(os.environ.get("DOC_REGIA_DATA", str(ROOT)))
 DATA.mkdir(parents=True,exist_ok=True)
+from voice_commands import parse_command, confirmation
 from serial_transport import ensure_port_available, claim_exclusive
 USB_BOOT_QUIET=3.0
 HELLO_RETRY=4.0
 AXES=6
 TOKEN=secrets.token_urlsafe(24)
+def path_units(path):
+ """Legacy edges stay sequential; explicit contiguous groups are atomic."""
+ units=[];seen=set()
+ for edge in path:
+  group=edge.get('group')
+  if group is not None:
+   if not isinstance(group,str) or not 1<=len(group)<=64:raise ValueError('Gruppo movimento non valido.')
+   if units and units[-1][0].get('group')==group:
+    if any(x['axis']==edge['axis'] for x in units[-1]):raise ValueError('Asse ripetuto nel gruppo.')
+    units[-1].append(edge);continue
+   if group in seen:raise ValueError('Gruppo movimento non contiguo.')
+   seen.add(group)
+  units.append([edge])
+ return units
+
+def motion_duration(distance,speed,a=20.0):
+ distance=abs(distance)
+ return 2*math.sqrt(distance/a) if distance<speed*speed/a else distance/speed+speed/a
+
+def motion_fraction(distance,speed,elapsed,a=20.0):
+ distance=abs(distance)
+ if not distance:return 1.
+ peak=min(speed,math.sqrt(distance*a));ramp=peak/a;duration=motion_duration(distance,speed,a)
+ if elapsed<=0:return 0.
+ if elapsed>=duration:return 1.
+ if elapsed<ramp:return .5*a*elapsed*elapsed/distance
+ if elapsed>duration-ramp:return 1-.5*a*(duration-elapsed)**2/distance
+ return (peak*(elapsed-ramp)+.5*a*ramp*ramp)/distance
+
 class Controller:
  def __init__(self):
   self.journal=None; self.firmware_busy=False; self.lock=threading.RLock(); self.fd=None; self.mode='demo'; self.connected=False
   self.home=False; self.pos=[0.0]*AXES; self.limits=[[0.0,0.0] for _ in range(AXES)]
-  self.trail=[]; self.sequence=[]; self.events=[]; self.busy=False; self.playing=False
+  self.trail=[]; self.sequence=[]; self.events=[];self.robot_events=[];self.event_counter=0; self.busy=False; self.playing=False
   self.repeat_cycle=False; self.paused=False; self.generation=0; self.done=threading.Event(); self.browser=time.monotonic()
   self.speed=5.0; self.requested_speed=5.0; self.speed_confirmed=False; self.speed_sent=0.0; self.firmware=''; self.connected_at=0.0; self.last_hello=0.0
   self.sequence_undo=None; self.max_speed=20.0; self.sequence_revision=0; self.awaiting_halt=False; self.boot_ready_at=0.0; self.serial_lines=0; self.last_serial=''; self.error=''; self.grip='non comandata'; self.cycle=0; self.identified=False; self.rx=b''
   self.axes_enabled=[True]*AXES;self.motion=None;self.firmware_profile="";self.profile_error="";self.profile_speed_limit=20.;self.reported_axes=5;self.configured_axes=5
-  self.axis_speeds=[5.0]*AXES;self.axis_control=False;self.drive_caps=[False]*AXES;self.drive_state=[None]*AXES;self.pending_off={};self.preparing_axis=None
+  self.pending_voice=None;self.multi_axis=False;self.multi_ack=False;self.pulses_per_rev=[61440]*AXES
+  self.axis_speeds=[5.0]*AXES;self.multi_axis=False;self.axis_control=False;self.drive_caps=[False]*AXES;self.drive_state=[None]*AXES;self.pending_off={};self.preparing_axis=None
   try:
    values=json.loads((DATA/'axis_speeds.json').read_text())
    if len(values)==AXES and all(type(v) in (int,float) and math.isfinite(v) and 1<=v<=20 for v in values):self.axis_speeds=values
@@ -41,6 +72,8 @@ class Controller:
    except (ValueError,KeyError):self.error='Sequenza salvata non leggibile'
   threading.Thread(target=self.io,daemon=True).start()
  def log(self,s):
+  self.event_counter+=1
+  self.robot_events=(self.robot_events+[dict(id=self.event_counter,time=time.time(),mode=self.mode,text=s)])[-300:]
   self.events=(self.events+[s])[-30:]
   if self.journal:
    try:self.journal.add('event',self.mode,s)
@@ -68,7 +101,7 @@ class Controller:
     if self.identified and (self.home or self.busy):self.halt('Reset della Mega: home da ristabilire.')
     self.max_speed=min(20.0 if s=='DOC REGIA 4' else 10.0,self.profile_speed_limit)
     self.identified=True
-    self.axis_control=False;self.drive_caps=[False]*AXES;self.drive_state=[None]*AXES
+    self.multi_axis=False;self.axis_control=False;self.drive_caps=[False]*AXES;self.drive_state=[None]*AXES
     # A startup identity may mean the board reset to its default speed/ENABLEs.
     # Require fresh acknowledgements instead of retaining stale hardware state.
     self.speed_confirmed=False;self.speed_sent=0.0
@@ -80,6 +113,9 @@ class Controller:
     try:self.reported_axes=max(5,min(AXES,int(s[5:])))
     except ValueError:pass
    elif s=='FEATURES AXIS_ENABLE':self.axis_control=True
+   elif s=='FEATURES MULTI_AXIS_V1':self.multi_axis=True
+   elif s=='MULTI ACK':
+    if self.motion and 'axes' in self.motion:self.multi_ack=True
    elif s.startswith('DRIVE_CAPS '):
     bits=s[11:]
     if len(bits)==AXES and set(bits)<=set('01'):self.drive_caps=[v=='1' for v in bits]
@@ -103,7 +139,10 @@ class Controller:
     if self.identified and math.isfinite(value) and 1<=value<=self.max_speed and abs(value-self.requested_speed)<.005:
      self.speed=value;self.speed_confirmed=True;self.error=''
      self.log('Velocità confermata: %.2f gradi/s'%value)
-   elif ' DONE:' in s:self.done.set()
+   elif ' DONE:' in s:
+    if self.motion and 'axes' in self.motion:
+     if self.multi_ack and s.startswith('MULTI DONE:'):self.done.set()
+    elif not s.startswith('MULTI '):self.done.set()
    elif s=='HALTED':
     if self.awaiting_halt:self.awaiting_halt=False;self.log('STOP confermato dalla Mega.')
     else:self.halt('Mega arrestata: verifica e ristabilisci HOME.',False)
@@ -155,8 +194,12 @@ class Controller:
    preview=self.pos[:]
    if self.motion:
     m=self.motion;f=max(0,min(1,(time.time()-m['started'])/max(.01,m['duration'])))
-    preview[m['axis']]=m['start']+(m['target']-m['start'])*f
-   return dict(axis_speeds=[min(v,self.max_speed) for v in self.axis_speeds],axis_control=self.mode=='demo' or self.axis_control,drive_caps=[True]*AXES if self.mode=='demo' else self.drive_caps,drive_state=self.drive_state,pending_off=list(self.pending_off),active_axis=self.motion['axis'] if self.motion else self.preparing_axis,axes_available=[self.mode=='demo' or i<min(self.reported_axes,self.configured_axes) for i in range(AXES)],hardware_ok=self.hardware_ok(),firmware_profile=self.firmware_profile,mode=self.mode,connected=self.connected,home=self.home,pos=self.pos[:],preview_pos=preview,motion=self.motion,axes_enabled=self.axes_enabled[:],limits=self.limits,trail=len(self.trail),sequence=self.sequence,sequence_revision=self.sequence_revision,can_undo=self.sequence_undo is not None,max_speed=self.max_speed,events=self.events,busy=self.busy,playing=self.playing,paused=self.paused,error=self.error,grip=self.grip,identified=self.identified,firmware=self.firmware,speed=self.speed,speed_confirmed=self.speed_confirmed,guidance=self.guide(),cycle=self.cycle,ports=glob.glob('/dev/cu.usbmodem*')+glob.glob('/dev/cu.usbserial*'))
+    if 'axes' in m:
+     for i in m['axes']:
+      progress=motion_fraction(1,m['path_speed'],time.time()-m['started'],m['path_acceleration'])
+      preview[i]=m['starts'][i]+(m['targets'][i]-m['starts'][i])*progress
+    else:preview[m['axis']]=m['start']+(m['target']-m['start'])*f
+   return dict(robot_events=self.robot_events[:],multi_axis=self.mode=='demo' or self.multi_axis,active_axes=self.motion.get('axes',[self.motion.get('axis')]) if self.motion else [],axis_speeds=[min(v,self.max_speed) for v in self.axis_speeds],axis_control=self.mode=='demo' or self.axis_control,drive_caps=[True]*AXES if self.mode=='demo' else self.drive_caps,drive_state=self.drive_state,pending_off=list(self.pending_off),active_axis=self.motion.get('axis') if self.motion else self.preparing_axis,axes_available=[self.mode=='demo' or i<min(self.reported_axes,self.configured_axes) for i in range(AXES)],hardware_ok=self.hardware_ok(),firmware_profile=self.firmware_profile,mode=self.mode,connected=self.connected,home=self.home,pos=self.pos[:],preview_pos=preview,motion=self.motion,axes_enabled=self.axes_enabled[:],limits=self.limits,trail=len(self.trail),sequence=self.sequence,sequence_revision=self.sequence_revision,can_undo=self.sequence_undo is not None,max_speed=self.max_speed,events=self.events,busy=self.busy,playing=self.playing,paused=self.paused,error=self.error,grip=self.grip,identified=self.identified,firmware=self.firmware,speed=self.speed,speed_confirmed=self.speed_confirmed,guidance=self.guide(),cycle=self.cycle,ports=glob.glob('/dev/cu.usbmodem*')+glob.glob('/dev/cu.usbserial*'))
  def hardware_ok(self):
   if self.profile_error:return False
   expected=getattr(self,'expected_profile','')
@@ -219,32 +262,93 @@ class Controller:
   for _ in range(30):
    if gen!=self.generation:raise ValueError('Interrotto')
    time.sleep(.05)
+ def group_plan(self,deltas):
+  if not isinstance(deltas,list) or len(deltas)!=AXES or any(type(d) not in (int,float) or not math.isfinite(d) or abs(d)>360 for d in deltas):raise ValueError('Inserisci sei spostamenti relativi da -360 a 360 gradi.')
+  deltas=[round(d,2) for d in deltas];targets=self.pos[:];axes=[]
+  for i,d in enumerate(deltas):
+   if not d:continue
+   targets[i]=self.validate(i,d);axes.append(i)
+   if abs(d)*self.pulses_per_rev[i]/360<.5:raise ValueError('Spostamento inferiore a un impulso: aumenta l’angolo.')
+  if not axes:raise ValueError('Inserisci almeno uno spostamento diverso da zero.')
+  if self.mode=='robot' and not self.multi_axis:raise ValueError('Movimento simultaneo: aggiorna e carica il firmware con MULTI_AXIS_V1.')
+  speeds=[min(v,self.max_speed) for v in self.axis_speeds]
+  total=sum(math.floor(abs(deltas[i])*self.pulses_per_rev[i]/360+.5) for i in axes)
+  path_speed=min(min(speeds[i]/abs(deltas[i]) for i in axes),2000./total)
+  path_acceleration=min(20./abs(deltas[i]) for i in axes)
+  effective=[abs(d)*path_speed for d in deltas]
+  duration=motion_duration(1,path_speed,path_acceleration)
+  return deltas,targets,axes,speeds,effective,duration,path_speed,path_acceleration
+ def group_context(self):
+  return hashlib.sha256((self.voice_context()+json.dumps([self.max_speed,self.profile_speed_limit,self.pulses_per_rev,self.configured_axes,self.reported_axes])).encode()).hexdigest()
+ def preview_group(self,deltas):
+  with self.lock:
+   try:
+    if self.busy or self.playing:raise ValueError('Attendi il termine del movimento.')
+    d,targets,axes,speeds,effective,duration,path_speed,path_acceleration=self.group_plan(deltas)
+    peak=min(path_speed,math.sqrt(path_acceleration))
+    pulse_total=sum(math.floor(abs(d[i])*self.pulses_per_rev[i]/360+.5) for i in axes)
+    budget_limited=2000./pulse_total < min(speeds[i]/abs(d[i]) for i in axes)-1e-9
+    return dict(valid=True,error='',deltas=d,targets=targets,axes=axes,requested=speeds,effective=effective,peaks=[abs(v)*peak for v in d],duration=duration,budget_limited=budget_limited,context=self.group_context())
+   except (ValueError,TypeError) as error:
+    return dict(valid=False,error=str(error),deltas=[],targets=[],axes=[],requested=[min(v,self.max_speed) for v in self.axis_speeds],effective=[0.]*AXES,peaks=[0.]*AXES,duration=0.,budget_limited=False,context='')
+ def move_group(self,deltas,gen,record=True):
+  with self.lock:
+   self.check()
+   if gen!=self.generation:raise ValueError('Interrotto')
+   deltas,targets,axes,speeds,effective,duration,path_speed,path_acceleration=self.group_plan(deltas)
+   self.busy=True;self.done.clear();self.multi_ack=False
+   self.motion=dict(path_speed=path_speed,path_acceleration=path_acceleration,axes=axes,starts=self.pos[:],targets=targets,speeds=effective,started=time.time(),duration=duration)
+   # One fully validated line, no per-axis start commands or streamed queue.
+   self.write('~multi '+' '.join('%.2f %.2f'%(d,v) for d,v in zip(deltas,speeds))+'\n')
+   self.log('Movimento simultaneo: '+', '.join('J%d %.2f°/s'%(i+1,effective[i]) for i in axes)+' · velocità limitate dal budget impulsi totale.')
+  deadline=time.monotonic()+(duration if self.mode=='demo' else duration*2+4)
+  while True:
+   if gen!=self.generation:raise ValueError('Interrotto')
+   if self.mode!='demo' and self.done.wait(.02):break
+   if time.monotonic()>=deadline:
+    if self.mode=='demo':break
+    self.halt('Timeout movimento simultaneo: ristabilisci HOME.');raise ValueError('Timeout')
+   if self.mode=='demo':time.sleep(.02)
+  with self.lock:
+   if gen!=self.generation:raise ValueError('Interrotto')
+   self.pos=targets;self.motion=None
+   if record:
+    group=uuid.uuid4().hex
+    self.trail.extend(dict(axis=i,delta=deltas[i],group=group) for i in axes)
+   if len(self.trail)>4000:self.halt('Percorso troppo lungo.');raise ValueError('Limite percorso')
+   self.log('Gruppo completato · '+('anteprima' if self.mode=='demo' else 'DONE firmware, posizione non misurata'))
+ def run_unit(self,unit,gen,reverse=False,record=True):
+  if unit[0].get('group') is not None:
+   deltas=[0.]*AXES
+   for step in unit:deltas[step['axis']]=step['delta']*(-1 if reverse else 1)
+   self.move_group(deltas,gen,record)
+  else:
+   step=unit[0];self.move(step['axis'],step['delta']*(-1 if reverse else 1),gen,record)
+ def wait_ready(self,gen):
+  while self.paused:
+   if gen!=self.generation:raise ValueError('Interrotto')
+   time.sleep(.05)
+  if gen!=self.generation:raise ValueError('Interrotto')
  def back(self,gen):
   self.validate_path(self.trail)
-  while self.trail:
-   while self.paused:
-    if gen!=self.generation:raise ValueError('Interrotto')
-    time.sleep(.05)
-   step=self.trail[-1];self.move(step['axis'],-step['delta'],gen,False)
-   with self.lock:self.trail.pop()
+  for unit in reversed(path_units(self.trail)):
+   self.wait_ready(gen);self.run_unit(unit,gen,True,False)
+   with self.lock:del self.trail[-len(unit):]
   self.log('Home raggiunta secondo il conteggio impulsi. Pinza mantenuta.')
  def follow_path(self,path,gen):
   self.validate_path(self.trail);self.validate_path(path)
-  common=0
-  while common<min(len(self.trail),len(path)) and self.trail[common]==path[common]:common+=1
-  def wait_ready():
-   while self.paused:
-    if gen!=self.generation:raise ValueError('Interrotto')
-    time.sleep(.05)
-   if gen!=self.generation:raise ValueError('Interrotto')
-  while len(self.trail)>common:
-   wait_ready();step=self.trail[-1]
-   self.move(step['axis'],-step['delta'],gen,False)
-   with self.lock:self.trail.pop()
-  for step in path[common:]:
-   wait_ready();self.move(step['axis'],step['delta'],gen)
-  wait_ready()
+  previous=path_units(self.trail);following=path_units(path);common=0
+  while common<min(len(previous),len(following)) and previous[common]==following[common]:common+=1
+  for unit in reversed(previous[common:]):
+   self.wait_ready(gen);self.run_unit(unit,gen,True,False)
+   with self.lock:del self.trail[-len(unit):]
+  for unit in following[common:]:
+   self.wait_ready(gen);self.run_unit(unit,gen,False,False)
+   with self.lock:self.trail.extend(x.copy() for x in unit)
+  self.wait_ready(gen)
  def validate_path(self,path):
+  path_units(path)
+  if self.mode=='robot' and not self.multi_axis and any('group' in x for x in path):raise ValueError('Il percorso richiede il firmware MULTI_AXIS_V1.')
   for step in path:
    if type(step.get('axis'))!=int or not 0<=step['axis']<AXES:raise ValueError('Asse del percorso non valido.')
    delta=step.get('delta')
@@ -282,16 +386,66 @@ class Controller:
    result.update(pos=target,path=path,edit_base_path=base,angles_edited=path!=base)
   result.update(name=name.strip(),dwell=dwell,grip=grip,enabled=enabled)
   return result
+ def validate_pose(self,pose):
+  self.validate_path(pose['path'])
+  if not pose.get('enabled',True):raise ValueError('Posa disabilitata.')
+  if pose.get('mode')!=self.mode:raise ValueError('Posa appartenente a una modalità diversa.')
+  p=[0.]*AXES
+  for step in pose['path']:
+   p[step['axis']]+=step['delta']
+   if not self.limits[step['axis']][0]<=p[step['axis']]<=self.limits[step['axis']][1]:raise ValueError('Posa fuori dai limiti attuali.')
+  if len(pose['pos'])!=AXES or any(abs(a-b)>.02 for a,b in zip(p,pose['pos'])):raise ValueError('Posa e percorso non coerenti.')
+  if pose.get('grip','non comandata') not in ('apri','chiudi','non comandata'):raise ValueError('Pinza non valida.')
+  if type(pose.get('dwell')) not in (int,float) or not math.isfinite(pose['dwell']) or not 0<=pose['dwell']<=60:raise ValueError('Pausa posa non valida.')
+ def voice_context(self):
+  return json.dumps([self.generation,self.mode,self.home,self.pos,self.trail,self.limits,self.axes_enabled,self.axis_speeds,self.sequence_revision,self.firmware_profile,self.firmware,self.multi_axis,self.hardware_ok()],sort_keys=True)
+ def prepare_voice(self,text,language="it"):
+  with self.lock:
+   self.pending_voice=None;self.check()
+   if self.busy or self.playing:raise ValueError('Attendi il termine o usa STOP.')
+   command=parse_command(text)
+   english=language=='en'
+   if command['op']=='joint_targets':
+    deltas=[0.]*AXES;phrases=[]
+    for target in command['targets']:
+     i=target['axis'];delta=round(target['value'] if target['relative'] else target['value']-self.pos[i],2)
+     position=self.validate(i,delta);deltas[i]=delta
+     phrases.append(('J%d to %.2f degrees, change %+.2f' if english else 'J%d a %.2f gradi, spostamento %+.2f')%(i+1,position,delta))
+    active=[i for i,d in enumerate(deltas) if d]
+    if not active:raise ValueError('Nessuno spostamento richiesto.')
+    if len(active)>1:
+     plan=self.preview_group(deltas)
+     if not plan['valid']:raise ValueError(plan['error'])
+     detail=', '.join(('J%d peak %.2f degrees per second' if english else 'J%d picco previsto %.2f gradi al secondo')%(i+1,plan['peaks'][i]) for i in active)
+     phrases.append(detail)
+     command=dict(op='multi_jog',deltas=deltas)
+    else:command=dict(op='jog',axis=active[0],delta=deltas[active[0]])
+    summary=('Move ' if english else 'Muovo ')+('; '.join(phrases))+'?'
+   else:
+    if not 0<=command['index']<len(self.sequence):raise ValueError('Posa non presente.')
+    self.validate_pose(self.sequence[command['index']]);self.validate_path(self.trail)
+    summary=('Run pose %d, %s, including its taught path and gripper action?' if english else 'Avvio posa %d, %s, incluso il percorso registrato e il comando pinza?')%(command['index']+1,self.sequence[command['index']]['name'])
+   token=secrets.token_urlsafe(24)
+   self.pending_voice=dict(token=token,command=command,context=self.voice_context(),expires=time.monotonic()+30)
+   return dict(token=token,summary=summary,text=text)
  def action(self,b):
   with self.lock:
    op=b['op'];self.browser=time.monotonic()
    if op=='heartbeat':return
+   if op=='voice_cancel':self.pending_voice=None;return
+   if op=='voice_execute':
+    result=confirmation(b.get('confirmation',''))
+    if result is False:self.pending_voice=None;return
+    if result is not True:raise ValueError('Di’ sì confermo oppure annulla.')
+    pending=self.pending_voice;self.pending_voice=None
+    if not pending or b.get('token')!=pending['token'] or time.monotonic()>pending['expires'] or self.voice_context()!=pending['context']:raise ValueError('Conferma vocale scaduta o stato cambiato: riconosci nuovamente il comando.')
+    return self.action(pending['command'])
    if self.firmware_busy and op not in ('stop','axis_stop'):raise ValueError('Attendi il termine dell’operazione firmware.')
    if op=='axis_stop':
     axis=b.get('axis')
     if type(axis)!=int or not 0<=axis<AXES:raise ValueError('Asse non valido')
-    active=self.motion['axis'] if self.motion else self.preparing_axis
-    if active==axis:self.halt('STOP J%d: impulsi interrotti, tenuta mantenuta. Ristabilisci HOME.'%(axis+1))
+    active=self.motion.get('axes',[self.motion.get('axis')]) if self.motion else [self.preparing_axis]
+    if axis in active:self.halt('STOP J%d: impulsi interrotti, tenuta mantenuta. Ristabilisci HOME.'%(axis+1))
     else:self.log('STOP J%d: giunto già fermo; nessun altro asse arrestato.'%(axis+1))
     return
    if op=='joint_enable':
@@ -339,7 +493,7 @@ class Controller:
     if b.get('mode')=='robot' and os.environ.get('DOC_REGIA_NO_HARDWARE')=='1':raise ValueError('Questa anteprima isolata non può aprire la USB del robot.')
     if self.busy or self.playing:raise ValueError('Ferma prima il movimento')
     if self.fd is not None:os.close(self.fd);self.fd=None
-    self.axis_control=False;self.drive_caps=[False]*AXES;self.drive_state=[None]*AXES;self.pending_off.clear();self.preparing_axis=None
+    self.multi_axis=False;self.axis_control=False;self.drive_caps=[False]*AXES;self.drive_state=[None]*AXES;self.pending_off.clear();self.preparing_axis=None
     self.connected=False;self.home=False;self.trail=[];self.pos=[0.0]*AXES;self.error='';self.limits=[[0.0,0.0] for _ in range(AXES)];self.grip='non comandata'
     self.max_speed=min(20.0 if b.get('mode','demo')=='demo' else 10.0,self.profile_speed_limit);self.awaiting_halt=False;self.serial_lines=0;self.last_serial='';self.mode=b.get('mode','demo');self.reported_axes=5;self.identified=False;self.rx=b'';self.firmware='';self.speed=min(5.0,self.max_speed);self.requested_speed=self.speed;self.firmware_profile='';self.speed_confirmed=False;self.connected_at=time.monotonic();self.boot_ready_at=self.connected_at+USB_BOOT_QUIET;self.last_hello=self.connected_at-HELLO_RETRY
     if self.mode=='robot':
@@ -422,6 +576,21 @@ class Controller:
     self.limits=v;return
    self.check()
    if self.busy or self.playing:raise ValueError('Attendi il termine o usa STOP')
+   if op=='pose_start':
+    index=b.get('index')
+    if type(index)!=int or not 0<=index<len(self.sequence):raise ValueError('Posa non presente.')
+    pose=json.loads(json.dumps(self.sequence[index]));self.validate_pose(pose);self.validate_path(self.trail)
+    def run_pose(g):
+     self.follow_path(pose['path'],g)
+     if pose.get('grip') in ('apri','chiudi'):self.servo(pose['grip'],g)
+     end=time.monotonic()+pose['dwell']
+     while time.monotonic()<end:
+      self.wait_ready(g);time.sleep(.03)
+     self.log('Posa raggiunta nel conteggio comandi: '+pose['name'])
+    self.spawn(run_pose);return
+   if op=='multi_jog':
+    if 'context' in b and b['context']!=self.group_context():raise ValueError('Velocità o stato modificati: controlla nuovamente il riepilogo del gruppo.')
+    deltas=self.group_plan(b.get('deltas'))[0];self.spawn(lambda g:self.move_group(deltas,g));return
    if op=='jog':
     a=int(b['axis']);d=round(float(b['delta']),2)
     self.validate(a,d);self.spawn(lambda g:self.move(a,d,g));return

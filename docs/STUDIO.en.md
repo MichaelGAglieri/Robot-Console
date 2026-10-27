@@ -142,3 +142,31 @@ actions with motor power removed. Updating the app never flashes the Mega.
 automatically saved in the app's local preferences, excluded from exported
 projects and never sent to the AI assistant. Development checks use preview,
 mock serial and firmware compilation, without physical movement.
+
+## Local build 27: simultaneous groups and voice
+
+Move and observe now offers explicit simultaneous relative movements, preserving per-joint speed ceilings and a shared acceleration profile. The firmware must advertise MULTI_AXIS_V1; older firmware remains usable for single-joint moves. Record pose preserves groups, including reverse traversal. Existing paths and Studio targets are not automatically converted. STOP on any group member stops the entire group and invalidates HOME.
+
+Robot voice commands use on-device transcription, separate from the AI assistant. Say “move J2 by 45 degrees”, “move J1 to 45 and J2 to 30”, or “start pose 1”. After the spoken summary finishes, say “yes confirm” or “cancel”. Confirmation expires after 30 seconds and state changes invalidate it. Optional continuous listening resumes only after successful motion. Use STOP/Esc during movement; voice is not an emergency stop. Firmware upload is explicit; physical timing and the microphone/speaker workflow require bench and local preview validation. Restore the pre-update data when rolling back to a build that does not understand groups.
+
+### Build 28: shared speed controls
+
+Choose Single or Simultaneous in Move and observe. In simultaneous mode enter displacements in the joint cards, using the same joint speed fields and sliders. Apply typed speeds with Return or ✓. The group summary shows the estimated peak per joint and total duration; edited speeds must be applied before starting. Changing speed or state invalidates the reviewed plan. Voice groups and recorded groups use the same applied joint settings. No firmware change from build 27.
+
+### Sidebars
+
+Events toggles robot activity on the left, with timestamps, mode, the latest 300 session events, optional follow mode and HOME/exit below. Notes toggles private notes on the right. Drag dividers to resize; hide either sidebar to give the central controls more space. Visibility persists. View menu shortcuts: Command-B for events, Option-Command-B for notes. Hiding a sidebar never changes motion state.
+
+### Larger preview and model HOME
+
+The 3D pane now expands next to the joint grid. Disconnect control and choose Model HOME to adjust joint offsets visually with sliders or numeric values. Preview and Cancel do not alter the project. Save backs up the previous project, updates model offsets, and clears physical mapping verification. Controller angles, operator HOME, firmware and motors are untouched. This is visual alignment, not measured calibration. If the old command count was nonzero, the preview shows the new model HOME until Follow commands is enabled.
+
+## Build 29: responsive center and light theme
+
+Central panels fill the available viewport as sidebars open, close or resize. Controls wrap in narrow layouts, and wide advanced forms scroll inside their own panels. Stored panel heights no longer leave blank space when content shrinks. Light appearance shares the dark theme’s bright lime accents, with inset continuous button outlines and larger, higher-contrast secondary labels. Firmware and motion settings are unchanged.
+
+The limits grid fits its content and arranges the six channels in one, two or three rows according to viewport width. Native selectors (theme, mode, port and presets) use readable dark text in light appearance.
+
+## Build 30: joint-speed confirmation
+
+Applied speeds retain two decimal places. Return or ✓ explicitly reconciles the edit state even if the value does not change. Repeated simultaneous moves no longer require reapplying acknowledged speeds; unapplied edits still block the group. Firmware, accelerations and motion planning are unchanged.

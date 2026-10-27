@@ -43,6 +43,29 @@ class StudioFixture(unittest.TestCase):
   self.s=Studio(self.folder,self.c,builtin=False);self.c.write=Mock()
  def tearDown(self):self.data.stop();self.temp.cleanup()
 class StudioTests(StudioFixture):
+ def test_model_home_preview_is_pure_and_cancel_needs_no_restore(self):
+  old=copy.deepcopy(self.s.calibration);self.s.save();saved=(self.s.folder/'project.json').read_bytes()
+  offsets={j['name']:0. for j in self.s.independent()};offsets[self.s.independent()[0]['name']]=.5
+  result=self.s.preview_home(offsets,self.s.model['source_hash'])
+  self.assertEqual(len(result['tcp']),3);self.assertEqual(self.s.calibration,old)
+  self.assertEqual((self.s.folder/'project.json').read_bytes(),saved);self.c.write.assert_not_called()
+ def test_model_home_save_preserves_controller_and_backs_up_project(self):
+  self.s.save();old=(self.s.folder/'project.json').read_bytes();self.s.verified=True
+  self.c.pos[0]=12.;self.c.home=True
+  offsets={j['name']:0. for j in self.s.independent()};offsets[self.s.independent()[0]['name']]=.4
+  self.s.apply_home(offsets,self.s.model['source_hash'])
+  self.assertEqual(self.c.pos[0],12.);self.assertTrue(self.c.home);self.assertFalse(self.s.verified);self.assertFalse(self.s.follow)
+  self.assertTrue(all(v==0 for v in self.s.preview.values()));self.c.write.assert_not_called()
+  backups=list((self.s.folder/'home-revisions').glob('*.json'));self.assertEqual(len(backups),1);self.assertEqual(backups[0].read_bytes(),old)
+  self.s.load_data(json.loads((self.s.folder/'project.json').read_text()));self.assertAlmostEqual(self.s.calibration[self.s.independent()[0]['name']]['offset'],.4)
+ def test_model_home_rejects_bad_or_connected_configuration_atomically(self):
+  offsets={j['name']:0. for j in self.s.independent()};old=copy.deepcopy(self.s.calibration)
+  with self.assertRaises(ValueError):self.s.apply_home(offsets,'wrong model')
+  for bad in ({},dict(offsets,invalid=0),{k:float('nan') for k in offsets}):
+   with self.assertRaises(ValueError):self.s.apply_home(bad,self.s.model['source_hash'])
+  self.c.connected=True
+  with self.assertRaises(ValueError):self.s.apply_home(offsets,self.s.model['source_hash'])
+  self.assertEqual(self.s.calibration,old);self.c.write.assert_not_called()
  def test_import_does_not_open_or_write_serial(self):
   path=self.folder/'arm.urdf';path.write_bytes(SIMPLE)
   with patch.object(os,'open',side_effect=AssertionError('serial forbidden')):self.s.import_urdf(path)

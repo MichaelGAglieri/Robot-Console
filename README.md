@@ -9,6 +9,7 @@ A native macOS application for teaching, previewing and replaying arm poses on u
 - Preview mode without hardware and explicit USB connection to the robot.
 - Italian / English selection and light, dark or automatic macOS appearance, with saved preferences.
 - Operator-defined HOME, editable joint limits and independent 1–20°/s joint speeds within the hardware profile limit.
+- Explicit simultaneous joint groups, shared manual/group speed controls and estimated speed/duration previews.
 - Per-joint STOP with holding torque, confirmed ENABLE control on wired drivers, and an autosaved operator notes sidebar.
 - Pose recording, editing, reordering, deletion, temporary exclusion and one-step undo.
 - Per-pose gripper state, pauses, repeat cycles and return along recorded paths.
@@ -16,7 +17,8 @@ A native macOS application for teaching, previewing and replaying arm poses on u
 - Position-only preview IK, approximate workcell boxes, bounded program blocks and CSV recordings.
 - Per-axis motor steps, microstepping, reducer ratio and direction; editable firmware sources, revisions, compilation and confirmed upload.
 - RViz visualization topics, ROS health, optional tool launchers, camera/QR and authenticated loopback sensor API.
-- Optional local Ollama chat, conversation journal, on-device Italian dictation and a read-only ROS 2 observer.
+- Italian/English on-device voice commands with spoken readback and explicit one-use confirmation.
+- Optional local Ollama chat, conversation journal, on-device dictation and a read-only ROS 2 observer.
 
 **Supported in this release:** macOS 14 or later on Apple Silicon, Python 3, Mega 2560 and the documented RAMPS/A4988/DM542 configuration. The firmware backend remains Mega/RAMPS: J1/X A4988, J2/Y external DM542, J3/Z, J4/E0, J5/E1; The bundled visualization retains five arm DOF; J6 can be tested in preview, excluded, or configured for a separate external STEP/DIR driver. Other boards and Windows are not supported yet. See [Studio guide](docs/STUDIO.md) for exact limits.
 
@@ -32,7 +34,7 @@ To build the app locally, install Apple's Command Line Tools and run:
 zsh native/build.command
 ```
 
-This creates `Robot Console.app` in this directory without opening USB, starting Ollama or uploading firmware. Read [docs/STUDIO.md](docs/STUDIO.md) and [docs/USAGE.md](docs/USAGE.md) before connecting a robot. Current version: **2.0.0**; included firmware protocol: **Regia 4**.
+This creates `Robot Console.app` in this directory without opening USB, starting Ollama or uploading firmware. For local updates, quit Robot Console and run `zsh native/install_local.command`: the installer verifies the app, saves the immediately previous build and a separate data recovery archive, installs in Applications and moves older managed app backups to Trash. It retains the current and immediately previous app generations; it does not open the app or connect hardware. Read [docs/STUDIO.md](docs/STUDIO.md) and [docs/USAGE.md](docs/USAGE.md) before connecting a robot. Current version: **2.0.1**; included firmware protocol: **Regia 4**.
 
 ## First use
 
@@ -41,7 +43,7 @@ This creates `Robot Console.app` in this directory without opening USB, starting
 3. Return to virtual HOME and replay. Only enabled poses perform their pause and gripper action.
 4. For physical use follow the [hardware guide](docs/HARDWARE.md), establish HOME and apply limits before moving. USB connection and a firmware acknowledgement do not measure the real arm's position.
 
-Physical movements remain sequential, one joint at a time. Clearing a joint checkbox can release winding current on wired A4988 drivers after confirmation; support a loaded axis before releasing it. J2/DM542 ENA is unwired in the reference configuration, so software exclusion cannot remove its holding torque. Per-joint ENABLE control requires the updated bundled firmware; updating the app never uploads it automatically.
+Explicit simultaneous groups are available from 2.0.1 with updated MULTI_AXIS_V1 firmware; existing taught paths and Studio targets retain their original sequencing. See [simultaneous motion and voice](docs/MULTI_VOICE.md). Clearing a joint checkbox can release winding current on wired A4988 drivers after confirmation; support a loaded axis before releasing it. J2/DM542 ENA is unwired in the reference configuration, so software exclusion cannot remove its holding torque. Per-joint ENABLE control requires the updated bundled firmware; updating the app never uploads it automatically.
 
 Pose editing saves data without moving the robot. New joint values extend the original recorded path in J1–J6 order; they are not collision-checked. Excluded poses can still be crossed by the recorded paths of later enabled poses.
 

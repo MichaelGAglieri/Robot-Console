@@ -69,6 +69,7 @@ class FirmwareWorkspace:
    if len(actual)!=len(expected) or any(abs(a-b)>1e-4 for a,b in zip(actual,expected)):return 'Costanti del sorgente diverse dal profilo: allinea i parametri e genera il firmware prima del controllo reale.'
   return ''
  def install_profile(self):
+  self.controller.pulses_per_rev=[math.floor(a['steps']*a['microstep']*a['reduction']+.5) for a in self.profile['axes']]
   c=self.controller;c.expected_profile=identity(self.profile);c.profile_default=identity(self.profile)==identity(DEFAULT);c.profile_speed_limit=speed_limit(self.profile);c.profile_error=self.error;c.configured_axes=6 if self.profile['axes'][5]['active'] else 5
  def gate(self):
   c=self.controller
@@ -81,7 +82,7 @@ class FirmwareWorkspace:
   return p
  def state(self):
   c=self.controller
-  return dict(axis_control_source='FEATURES AXIS_ENABLE' in self.file('RegiaDemo.ino').read_text(),profile=self.profile,identity=identity(self.profile),default=DEFAULT,max_speed=speed_limit(self.profile),files=self.files(),folder=str(self.path),status=self.status,error=self.error,received_identity=getattr(c,'firmware_profile',''),matches=c.hardware_ok())
+  return dict(multi_axis_source='FEATURES MULTI_AXIS_V1' in self.file('RegiaDemo.ino').read_text(),axis_control_source='FEATURES AXIS_ENABLE' in self.file('RegiaDemo.ino').read_text(),profile=self.profile,identity=identity(self.profile),default=DEFAULT,max_speed=speed_limit(self.profile),files=self.files(),folder=str(self.path),status=self.status,error=self.error,received_identity=getattr(c,'firmware_profile',''),matches=c.hardware_ok())
  def backup(self):
   name=time.strftime('%Y%m%d-%H%M%S')+'-'+str(time.time_ns()%1_000_000)
   dest=self.folder/'revisions'/name;dest.parent.mkdir(exist_ok=True);shutil.copytree(self.path,dest)

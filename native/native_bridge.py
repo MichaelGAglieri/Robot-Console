@@ -51,7 +51,10 @@ try:
    request=json.loads(line)
    assistant.language='en' if request.get('language')=='en' else 'it'
    op=request.get('op');extra={}
-   if op=='firmware_read':extra={'firmware_file':request['name'],'firmware_text':workspace.file(request['name']).read_text()}
+   if op=='studio_home_preview':extra={'home_preview':studio.preview_home(request.get('offsets'),request.get('model_hash'))}
+   elif op=='multi_preview':extra={'multi_plan':server.c.preview_group(request.get('deltas'))}
+   elif op=='voice_prepare':extra={'voice_command':server.c.prepare_voice(request.get('text'),request.get('language','it'))}
+   elif op=='firmware_read':extra={'firmware_file':request['name'],'firmware_text':workspace.file(request['name']).read_text()}
    elif op=='firmware_save':workspace.save_file(request['name'],request['text'])
    elif op=='firmware_generate':workspace.generate(request['profile'])
    elif op=='firmware_upgrade_axes':workspace.upgrade_axis_control()

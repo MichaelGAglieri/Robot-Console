@@ -278,15 +278,19 @@ class Studio:
   if not poses:raise ValueError('Nessuna posa abilitata da visualizzare.')
   if not 0<=index<len(poses):raise ValueError('Posa non valida.')
   fraction=number(fraction,0,1)
-  previous=[] if index==0 else poses[index-1]['path'];following=poses[index]['path'];common=0
-  while common<min(len(previous),len(following)) and previous[common]==following[common]:common+=1
-  segments=[dict(axis=x['axis'],delta=-x['delta']) for x in reversed(previous[common:])]+following[common:]
-  self.controller.validate_path(segments)
+  from server import path_units
+  previous=[] if index==0 else poses[index-1]['path'];following=poses[index]['path']
+  before=path_units(previous);after=path_units(following);common=0
+  while common<min(len(before),len(after)) and before[common]==after[common]:common+=1
+  units=[[dict(x,delta=-x['delta']) for x in unit] for unit in reversed(before[common:])]+after[common:]
+  segments=[x for unit in units for x in unit];self.controller.validate_path(segments)
   values=[0.]*6
   for step in previous:values[step['axis']]+=step['delta']
   distance=sum(abs(x['delta']) for x in segments)*fraction
-  for step in segments:
-   part=min(distance,abs(step['delta']));values[step['axis']]+=math.copysign(part,step['delta']);distance-=part
+  for unit in units:
+   length=sum(abs(x['delta']) for x in unit);progress=min(1.,distance/length) if length else 1.
+   for step in unit:values[step['axis']]+=step['delta']*progress
+   distance-=length
    if distance<=0:break
   self.follow=False
   for j in self.independent():
@@ -350,7 +354,11 @@ class Studio:
     if type(axis)!=int or not 0<=axis<6:raise ValueError('Asse della posa non valido.')
     total[axis]+=delta
     if abs(total[axis])>360.01:raise ValueError('Percorso posa oltre gli angoli ammessi.')
-    path.append(dict(axis=axis,delta=delta))
+    entry=dict(axis=axis,delta=delta)
+    if 'group' in step:entry['group']=step['group']
+    path.append(entry)
+   from server import path_units
+   path_units(path)
    if any(abs(a-b)>.02 for a,b in zip(total,pos)):raise ValueError('Posa e percorso non coerenti.')
    result.append(dict(name=name,mode=mode,grip=grip,enabled=enabled,pos=pos,path=path,dwell=number(raw.get('dwell',0),0,60)))
   return result
@@ -373,10 +381,42 @@ class Studio:
   state=self.controller.state();positions=self.current_positions(state);cal=self.calibration
   values={j['name']:positions[j['name']]*cal[j['name']]['sign']+cal[j['name']]['offset'] for j in self.independent()}
   return dict(model=self.model,positions=values,gripper=positions.get('__gripper',0),source='preview' if not self.follow or state['mode']=='demo' else 'command_estimate',prefix='robot_console/',urdf=self.visualization_urdf())
+ def home_calibration(self,offsets,model_hash):
+  if model_hash!=self.model['source_hash']:raise ValueError('Modello cambiato: riapri la regolazione HOME.')
+  names={j['name'] for j in self.independent()}
+  if not isinstance(offsets,dict) or set(offsets)!=names:raise ValueError('Specifica la HOME di ogni giunto del modello.')
+  calibration=copy.deepcopy(self.calibration)
+  for joint in self.independent():
+   value=number(offsets[joint['name']],joint['lower'],joint['upper'])
+   calibration[joint['name']]['offset']=value
+  return calibration
+ def preview_home(self,offsets,model_hash):
+  with self.lock:
+   calibration=self.home_calibration(offsets,model_hash);zero={j['name']:0. for j in self.independent()}
+   transforms=frames(self.model,zero,calibration)
+   return dict(frames=[dict(name=name,matrix=[v for row in matrix for v in row]) for name,matrix in transforms.items()],tcp=tcp(self.model,zero,calibration,self.tip,self.tool),model_hash=self.model['source_hash'])
+ def apply_home(self,offsets,model_hash):
+  self.idle_configuration();calibration=self.home_calibration(offsets,model_hash)
+  old=dict(calibration=copy.deepcopy(self.calibration),preview=self.preview.copy(),verified=self.verified,follow=self.follow,status=self.status)
+  saved=self.folder/'project.json'
+  if saved.exists():
+   history=self.folder/'home-revisions';history.mkdir(exist_ok=True)
+   shutil.copyfile(saved,history/(time.strftime('%Y%m%d-%H%M%S')+'-'+uuid.uuid4().hex[:8]+'.json'))
+  try:
+   self.calibration=calibration;self.preview={j['name']:0. for j in self.independent()};self.verified=False;self.follow=all(abs(q)<.000001 for q in self.controller.pos)
+   self.status='HOME del modello salvata a vista; non è una calibrazione misurata. Verifica nuovamente il mapping prima dei target reali.'
+   self.save()
+  except Exception:
+   for key,value in old.items():setattr(self,key,value)
+   raise
+  self.controller.log('HOME del modello aggiornata: nessun comando ai motori e nessuno zero hardware modificato.')
  def action(self,request):
   op=request['op'];c=self.controller
   with self.lock:
-   if op=='studio_import':self.import_urdf(request['path'])
+   if op=='studio_home_apply':
+    if request.get('confirmed') is not True:raise ValueError('Conferma esplicita richiesta.')
+    self.apply_home(request.get('offsets'),request.get('model_hash'))
+   elif op=='studio_import':self.import_urdf(request['path'])
    elif op=='studio_default':
     self.idle_configuration();self.load_reference();self.save()
    elif op=='studio_preview':
