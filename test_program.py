@@ -146,9 +146,10 @@ class ProgramExecutionTests(ProgramBase):
         self.s.action(dict(op='studio_program_step')); self.wait(lambda: self.s.movej.step_waiting and plan['stages'][self.s.movej.exec_stage+1]['block_index'] == 2)
         self.assertEqual(len(self.multi_lines()), 1+len([s for s in plan['stages'] if s['block_index'] == 1]))
         end = self.tip(); self.assertAlmostEqual(end[0], .25, places=3); self.assertAlmostEqual(end[2], .04, places=3)  # on the piece
-        time.sleep(.5); self.s.action(dict(op='studio_program_continue')); self.wait()
-        # Simulated DONE comes after ~0.1 s: a 0.5 s operator pause would show up if it were counted.
-        for m in self.s.movej.exec_measured: self.assertLess(m['actual'], .45 if m['kind'] == 'movej' else 2.)
+        time.sleep(2.); self.s.action(dict(op='studio_program_continue')); self.wait()
+        # Simulated DONE comes after ~0.1 s and a grip lasts its planned time: a 2 s operator pause would
+        # show up if it were counted. The margins leave room for slow CI runners.
+        for m in self.s.movej.exec_measured: self.assertLess(m['actual'], 1.5 if m['kind'] == 'movej' else m['planned'] + 1.8)
         self.assertTrue(self.s.movej.exec_done, self.s.movej.exec_error); self.assertNotEqual(self.c.trail, [])  # away from HOME
         with self.assertRaisesRegex(ValueError, 'passo passo'): self.s.action(dict(op='studio_program_step'))
 

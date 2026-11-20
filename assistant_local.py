@@ -21,6 +21,8 @@ class Journal:
    where="kind IN ('user','assistant')" if chat else "kind NOT IN ('user','assistant')"
    rows=self.db.execute(f'SELECT id,time,kind,source,text FROM entries WHERE {where} ORDER BY id DESC LIMIT ?',(limit,)).fetchall()
    return [dict(zip(('id','time','kind','source','text'),r)) for r in reversed(rows)]
+ def close(self):
+  with self.lock:self.db.close()
  def notes(self):
   with self.lock:return self.db.execute("SELECT text FROM entries WHERE kind='note' ORDER BY id DESC LIMIT 20").fetchall()
 
