@@ -77,13 +77,15 @@ Le pose e i limiti salvati a cinque canali vengono estesi con J6 a zero.
 
 ## Modelli, calibrazione e progetti
 
-Il modello predefinito è il DOC a **cinque assi della presentazione e di Webots**,
-una versione illustrativa derivata dall’UR3e con pinza radiale. Non è il CAD fisico EB-15.
+Il modello predefinito è il DOC a **cinque assi EB-15 con pinza EBG-30**,
+ricostruito dagli STL originali ToolBox con lo stesso generatore di presentazione e
+Webots. Geometria e quote sono nominali CAD, non calibrazione misurata sul robot.
+Le mesh riportano licenza CC BY-NC-ND: verificarne la distribuzione prima di pubblicare.
 Le dita sono elementi visivi e non consumano J6. Gli offset HOME iniziali sono quelli
-nominali della presentazione: verifica la calibrazione prima dell’uso fisico.
+nominali del CAD con braccio verticale: verifica la calibrazione prima dell’uso fisico.
 **Carica DOC 5 DOF** ripristina questo modello a controllo scollegato.
 
-Trascina sul modello per ruotare attorno al braccio. Rotella e pizzico regolano lo zoom;
+Due dita sul trackpad o trascinamento sul modello ruotano attorno al braccio; Maiusc + due dita trasla la vista. Pizzico e rotella del mouse regolano lo zoom;
 i pulsanti ↺/↻ ruotano di 15°. **Adatta vista** ricentra e inquadra tutte le mesh.
 
 
@@ -105,8 +107,8 @@ I giunti prismatici sono solo visuali, non comandabili con questo firmware rotat
 
 Gli slider e i target numerici modificano il modello. **Esegui target visualizzato…**
 richiede conferma, limiti validi e mapping verificato per il robot reale. Esegue un asse
-alla volta; non introduce traiettorie fisiche coordinate. L'IK è solo di posizione, non
-impone l'orientamento e aggiorna esclusivamente l'anteprima.
+alla volta; non introduce traiettorie fisiche coordinate. L'IK e il jog cartesiano
+(build 34, [IK_JOG.md](IK_JOG.md)) aggiornano esclusivamente l'anteprima.
 
 Gli ostacoli sono box in metri: `[{"name":"tavolo","center":[0,0,-0.1],"size":[1,1,0.1]}]`.
 Il controllo usa segmenti tra origini dei link, margine 25 mm e campionamento del percorso
@@ -242,3 +244,48 @@ sempre lo stato del campo, anche se il valore non cambia. I movimenti simultanei
 successivi non richiedono di confermare nuovamente velocità già applicate. Una
 modifica ancora non confermata continua a bloccare il gruppo. Nessuna modifica
 al firmware, alle accelerazioni o al calcolo dei movimenti.
+
+## Build 32: riferimenti di lavoro e target locali
+
+Vedi [contratto, uso e migrazione dei riferimenti](WORK_FRAMES.md). Da Modello del
+braccio apri Riferimenti di lavoro e target: crea un riferimento XYZ/RPY, salva un
+target locale, selezionalo nell’albero e usa Adatta vista per inquadrare gli indicatori
+3D. Esportazione/importazione conserva la scena. Questo incremento è solo geometrico
+e offline: non aggiunge MoveJ, MoveL o vincoli di orientamento all’IK esistente.
+
+## Build 33: MoveJ virtuale e guida completa
+
+Il pulsante Guida apre il [manuale completo offline](USER_GUIDE.md), con 30 capitoli,
+indice ricercabile e salvataggio del testo. Il [nuovo MoveJ](MOVEJ_PREVIEW.md) prepara
+un piano comune virtuale da angoli, giunti Studio, pose o programma, con traccia TCP,
+durata, picchi, cursore e arresto locale. Non cambia l’esecuzione fisica o i percorsi
+salvati. Disponibile solo in Anteprima senza seriale; nessun firmware nuovo.
+
+## Build 34: IK a cinque assi e jog cartesiano
+
+Nuovo pannello **IK e jog cartesiano · anteprima** sotto il braccio 3D. IK con priorità
+(posizione, poi asse della pinza, poi rotazione), più configurazioni con scelta della più
+vicina, motivi espliciti di irraggiungibilità, avviso di singolarità e jog XYZ/Rx-Ry-Rz
+nella base, nei riferimenti di lavoro o nell'utensile. Solo anteprima: nessun comando ai
+motori, nessun nuovo percorso di esecuzione. Dettagli in [IK_JOG.md](IK_JOG.md).
+
+## Build 35: esecuzione MoveJ comune
+
+**Esegui MoveJ…** esegue, dopo conferma, esattamente il piano mostrato nell’anteprima, un
+movimento simultaneo per tratto con attesa del DONE della Mega. **Esegui target
+visualizzato…** usa lo stesso piano e lo stesso esecutore. STOP, perdita della USB e
+errori interrompono senza ripresa automatica. Dettagli in [MOVEJ_PREVIEW.md](MOVEJ_PREVIEW.md).
+
+## Build 36: MoveL
+
+Sorgente **Retta MoveL** nel pannello MoveJ: retta del TCP verso un punto della base o di
+un riferimento, divisa nei movimenti simultanei necessari a restare entro la tolleranza,
+con deviazione misurata, tratto irraggiungibile localizzato e durata misurata durante
+l'esecuzione. Dettagli in [MOVEL.md](MOVEL.md).
+
+## Build 38: collisioni e validazione
+
+Geometria a capsule ricavata dalle mesh di ogni link, autocollisioni, ostacoli e piano di
+lavoro z = 0 con margine regolabile; **Valida programma / Valida sequenza** simulano i
+percorsi insegnati con ritorno a HOME e indicano la tappa del problema; Riproduci ed
+Esegui programma verificano prima di partire. Dettagli in [COLLISIONI.md](COLLISIONI.md).

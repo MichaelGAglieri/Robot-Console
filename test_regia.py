@@ -39,14 +39,18 @@ class Tests(unittest.TestCase):
   self.c.sequence=[dict(name='test',mode='demo',pos=self.c.pos[:],path=self.c.trail[:],grip='non comandata',dwell=0)]
   self.c.action({'op':'home'});self.wait()
   self.c.action({'op':'play','repeat':False});self.wait()
-  self.assertEqual(self.c.cycle,1);self.assertEqual(self.c.pos,[0]*6)
+  self.assertEqual(self.c.cycle,1);self.assertEqual(self.c.pos,[.25,0,0,0,0,0])
+ def test_history_cap_does_not_force_a_new_home(self):
+  self.c.trail=[dict(axis=0,delta=0)]*4000
+  self.c.action(dict(op='jog',axis=0,delta=.25));self.wait()
+  self.assertTrue(self.c.home);self.assertEqual(self.c.pos[0],.25);self.assertEqual(len(self.c.trail),4000)
  def test_preview_cannot_run_on_robot(self):
   self.c.sequence=[dict(name='preview',mode='demo',pos=[0]*6,path=[],grip='non comandata',dwell=0)]
   self.c.mode='robot'
   with self.assertRaises(ValueError):self.c.action({'op':'play'})
   self.assertFalse(self.c.playing)
  def test_return_owns_motion_until_complete(self):
-  self.c.trail=[dict(axis=0,delta=.25),dict(axis=1,delta=.25)];self.c.pos=[.25,.25,0,0,0,0]
+  self.c.trail=[dict(axis=0,delta=1),dict(axis=1,delta=1)];self.c.pos=[1,1,0,0,0,0];self.c.axis_speeds=[1]*6
   self.c.action({'op':'home'})
   time.sleep(.6)
   with self.assertRaises(ValueError):self.c.action({'op':'jog','axis':2,'delta':.25})

@@ -58,13 +58,13 @@ class StudioTests(StudioFixture):
   self.assertTrue(all(v==0 for v in self.s.preview.values()));self.c.write.assert_not_called()
   backups=list((self.s.folder/'home-revisions').glob('*.json'));self.assertEqual(len(backups),1);self.assertEqual(backups[0].read_bytes(),old)
   self.s.load_data(json.loads((self.s.folder/'project.json').read_text()));self.assertAlmostEqual(self.s.calibration[self.s.independent()[0]['name']]['offset'],.4)
- def test_model_home_rejects_bad_or_connected_configuration_atomically(self):
+ def test_model_home_rejects_bad_and_keeps_reference_when_connected(self):
   offsets={j['name']:0. for j in self.s.independent()};old=copy.deepcopy(self.s.calibration)
   with self.assertRaises(ValueError):self.s.apply_home(offsets,'wrong model')
   for bad in ({},dict(offsets,invalid=0),{k:float('nan') for k in offsets}):
    with self.assertRaises(ValueError):self.s.apply_home(bad,self.s.model['source_hash'])
-  self.c.connected=True
-  with self.assertRaises(ValueError):self.s.apply_home(offsets,self.s.model['source_hash'])
+  self.c.connected=True;self.c.home=True;self.c.pos=[3,0,0,0,0,0]
+  self.s.apply_home(offsets,self.s.model['source_hash']);self.assertTrue(self.c.home);self.assertEqual(self.c.pos,[3,0,0,0,0,0])
   self.assertEqual(self.s.calibration,old);self.c.write.assert_not_called()
  def test_import_does_not_open_or_write_serial(self):
   path=self.folder/'arm.urdf';path.write_bytes(SIMPLE)
@@ -92,14 +92,14 @@ class StudioTests(StudioFixture):
   self.c.action({'op':'joint_enable','axis':0,'enabled':False})
   self.c.spawn=Mock()
   with self.assertRaises(ValueError):self.c.action({'op':'jog','axis':0,'delta':1})
-  self.c.trail=[{'axis':0,'delta':1}]
+  self.c.trail=[{'axis':0,'delta':1}];self.c.pos[0]=1
   with self.assertRaises(ValueError):self.c.action({'op':'home'})
-  self.c.trail=[];self.c.sequence=[dict(name='x',mode='demo',path=[dict(axis=0,delta=1)],pos=[1,0,0,0,0],grip='non comandata',enabled=True,dwell=0)]
+  self.c.trail=[];self.c.pos=[0]*6;self.c.sequence=[dict(name='x',mode='demo',path=[dict(axis=0,delta=1)],pos=[1,0,0,0,0],grip='non comandata',enabled=True,dwell=0)]
   with self.assertRaises(ValueError):self.c.action({'op':'play'})
   self.c.spawn.assert_not_called()
  def test_no_partial_home_before_disabled_joint(self):
   self.c.action({'op':'connect','mode':'demo'});self.c.action({'op':'home_set'});self.c.trail=[dict(axis=0,delta=1),dict(axis=1,delta=1)]
-  self.c.axes_enabled[0]=False;self.c.move=Mock()
+  self.c.pos=[1,1,0,0,0,0];self.c.limits=[[-90,90]]*6;self.c.axes_enabled[0]=False;self.c.move=Mock()
   with self.assertRaises(ValueError):self.c.back(self.c.generation)
   self.c.move.assert_not_called()
  def test_preview_is_visual_only(self):
@@ -160,9 +160,9 @@ class ProgramExecutionTests(StudioFixture):
   self.c.action(dict(op='connect',mode='demo'));self.c.action(dict(op='home_set'));self.s.define_sensor('contact','digital')
   self.s.blocks=self.s.validate_blocks([dict(kind='sensor',sensor='contact',timeout=.1,expected=1)])
   self.s.run_program();self.wait_program();self.assertIn('Timeout sensore',self.s.program_error);self.assertFalse(self.c.home)
- def test_recorded_path_preview_reverses_old_branch_first(self):
+ def test_preview_interpolates_only_between_active_pose_targets(self):
   self.c.sequence=[dict(name='a',pos=[10,0,0,0,0],path=[dict(axis=0,delta=10)],mode='demo',enabled=True),dict(name='b',pos=[0,10,0,0,0],path=[dict(axis=1,delta=10)],mode='demo',enabled=True)]
-  self.s.preview_sequence(1,.25);self.assertAlmostEqual(math.degrees(self.s.preview['joint_1']),5);self.assertEqual(self.s.preview['joint_2'],0);self.c.write.assert_not_called()
+  self.s.preview_sequence(1,.25);self.assertAlmostEqual(math.degrees(self.s.preview['joint_1']),7.5);self.assertAlmostEqual(math.degrees(self.s.preview['joint_2']),2.5);self.c.write.assert_not_called()
 
 class IntegrationGuardTests(StudioFixture):
  def test_isolated_preview_blocks_usb_and_upload_before_any_operation(self):
@@ -254,5 +254,12 @@ class ReferenceModelTests(StudioFixture):
  def test_reference_portable_roundtrip_keeps_home_calibration(self):
   reference=Studio(self.folder,self.c,builtin=True);archive=self.folder/'reference.zip';reference.export_project(archive);offset=reference.calibration['joint_1']['offset'];reference.import_project(archive)
   self.assertEqual(reference.calibration['joint_1']['offset'],offset);self.assertTrue(all(Path(v['mesh']).is_file() for link in reference.model['links'] for v in link['visuals']));self.assertFalse(reference.verified)
+ def test_outdated_bundled_reference_is_upgraded_with_backup(self):
+  reference=Studio(self.folder,self.c,builtin=True);reference.mapping['joint_2']=3;reference.calibration['joint_2']['sign']=-1;reference.calibration['joint_2']['offset']=1.2
+  reference.raw=reference.raw.replace('<robot name="','<robot name="vecchio ');reference.obstacles=[dict(name='banco',center=[.5,0,0],size=[.1,.1,.1])];reference.save()
+  upgraded=Studio(self.folder,self.c,builtin=True);bundled=(Path(__file__).parent/'models/doc5/doc5.urdf').read_text()
+  self.assertEqual(upgraded.raw,bundled);self.assertEqual(upgraded.mapping['joint_2'],3);self.assertEqual(upgraded.calibration['joint_2'],dict(sign=-1,offset=0))
+  self.assertEqual(upgraded.obstacles[0]['name'],'banco');self.assertEqual(len(list((self.folder/'studio').glob('project-prima-modello-*.json'))),1);self.c.write.assert_not_called()
+  self.assertEqual(Studio(self.folder,self.c,builtin=True).raw,bundled);self.assertEqual(len(list((self.folder/'studio').glob('project-prima-modello-*.json'))),1)
 
 if __name__=='__main__':unittest.main()

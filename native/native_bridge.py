@@ -20,6 +20,7 @@ from studio import Studio
 from firmware_workspace import FirmwareWorkspace
 from tool_manager import ToolManager
 from local_api import LocalAPI
+from jarvis_channel import JarvisChannel
 journal=Journal(folder)
 server.c.journal=journal
 ollama=OllamaLocal(folder)
@@ -33,6 +34,9 @@ firmware.workspace=workspace
 extra={}
 tools=ToolManager(folder,journal)
 api=LocalAPI(server.c,studio)
+jarvis=JarvisChannel(server.c,studio,folder,journal)
+try:jarvis.start()
+except (OSError,ValueError) as error:journal.add("error","jarvis",str(error))
 last_limits={}
 try:
  stored=json.loads((folder/'limiti.json').read_text())
@@ -43,12 +47,13 @@ journal.add('session','app','Sessione avviata; nessuna connessione hardware auto
 def reply():
  state=server.c.state()
  if ros.process:ros.snapshot(state,studio.ros_snapshot())
- return dict(ros_health=ros.state(),tools=tools.state(),local_api=api.state(),firmware_workspace=workspace.state(),**extra,studio=studio.state(),state=state,chat=journal.recent(30,True),diary=journal.recent(30),assistant_busy=assistant.busy,ros_status=ros.status,ros_event=ros.last_event,ollama=ollama.state(),firmware=firmware.state(),last_limits=last_limits)
+ return dict(jarvis_quit=jarvis.quit_requested,jarvis_connection=jarvis.take_connection_selection(),ros_health=ros.state(),tools=tools.state(),local_api=api.state(),firmware_workspace=workspace.state(),**extra,studio=studio.state(),state=state,chat=journal.recent(30,True),diary=journal.recent(30),assistant_busy=assistant.busy,ros_status=ros.status,ros_event=ros.last_event,ollama=ollama.state(),firmware=firmware.state(),last_limits=last_limits)
 
 try:
  for line in sys.stdin:
   try:
    request=json.loads(line)
+   jarvis.update_ui(request.get("jarvis_ui"))
    assistant.language='en' if request.get('language')=='en' else 'it'
    op=request.get('op');extra={}
    if op=='studio_home_preview':extra={'home_preview':studio.preview_home(request.get('offsets'),request.get('model_hash'))}
@@ -77,8 +82,13 @@ try:
    elif op=='tool_check':tools.project=request.get('project','')
    elif op=='api_start':api.start()
    elif op=='api_stop':api.stop()
+   elif op=='api_permissions':
+    if not api.server:raise ValueError('Avvia prima l’API locale.')
+    api.commands.configure(request.get('enabled'),request.get('demo_execution'))
+   elif op=='api_approve':api.commands.approve(request.get('id'),request.get('confirmed') is True)
    else:
     if op!='heartbeat':journal.add('request',server.c.mode,json.dumps(request,ensure_ascii=False))
+    if op in ('play','home','pose_start'):studio.follow=True;studio.movej.running=False;studio.movej.visual_active=False
     server.c.action(request)
     if op=='limits':
      last_limits[server.c.mode]=[pair[:] for pair in server.c.limits]
@@ -88,6 +98,7 @@ try:
    journal.add('error','app',str(e))
    print(json.dumps(dict(reply(),error=str(e))),flush=True)
 finally:
+ jarvis.close()
  api.stop()
  tools.close()
  studio.close()

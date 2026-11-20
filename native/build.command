@@ -6,13 +6,13 @@ cd "$(dirname "$0")/.."
 APP='Robot Console.app'
 python3 scripts/build_localizations.py
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-xcrun swiftc -target arm64-apple-macos14.0 -parse-as-library -swift-version 5 -module-cache-path /private/tmp/doc-swift-cache -o "$APP/Contents/MacOS/DOCRegia" native/Regia.swift native/Localization.swift native/VoiceCapture.swift native/Appearance.swift native/AssistantSpeech.swift native/StudioView.swift native/BridgeLineReader.swift native/FirmwareEditor.swift native/ROSPanel.swift native/CameraPanel.swift
+xcrun swiftc -target arm64-apple-macos14.0 -parse-as-library -swift-version 5 -module-cache-path /private/tmp/doc-swift-cache -o "$APP/Contents/MacOS/DOCRegia" native/Regia.swift native/InputDraft.swift native/Localization.swift native/VoiceCapture.swift native/Appearance.swift native/AssistantSpeech.swift native/StudioView.swift native/ViewportSupport.swift native/WorkSceneView.swift native/MoveJPreviewView.swift native/ProgramView.swift native/CartesianView.swift native/GuideView.swift native/BridgeLineReader.swift native/FirmwareEditor.swift native/ROSPanel.swift native/APIPanel.swift native/CameraPanel.swift
 cp native/Info.plist "$APP/Contents/Info.plist"
 cp native/DOCRegia.icns "$APP/Contents/Resources/DOCRegiaCover.icns"
-cp voice_commands.py local_api.py tool_manager.py firmware_workspace.py robot_model.py studio.py server.py serial_transport.py firmware_tools.py assistant_local.py ollama_local.py native/ros_link.py native/ros_observer.py native/native_bridge.py "$APP/Contents/Resources/"
+cp jarvis_channel.py program_functions.py robot_console_client.py program_api.py io_adapters.py program_plan.py program_lang.py collision.py validation.py ik5.py ik_studio.py movel.py movej_preview.py movej_run.py movej_studio.py work_scene.py voice_commands.py local_api.py tool_manager.py firmware_workspace.py robot_model.py studio.py server.py serial_transport.py firmware_tools.py assistant_local.py ollama_local.py native/ros_link.py native/ros_observer.py native/native_bridge.py "$APP/Contents/Resources/"
 /usr/bin/ditto RegiaDemo "$APP/Contents/Resources/RegiaDemo"
 mkdir -p "$APP/Contents/Resources/docs"
-cp docs/STUDIO.md docs/STUDIO.en.md docs/MULTI_VOICE.md "$APP/Contents/Resources/docs/"
+cp docs/CAMPI_E_SEQUENZE.md docs/SOTTOPROGRAMMI.md docs/PYTHON_API.md docs/STUDIO.md docs/STUDIO.en.md docs/MULTI_VOICE.md docs/WORK_FRAMES.md docs/MOVEJ_PREVIEW.md docs/IK_JOG.md docs/MOVEL.md docs/COLLISIONI.md docs/PROGRAMMI.md docs/USER_GUIDE.md docs/USER_GUIDE.en.md "$APP/Contents/Resources/docs/"
 cp native/Localization/English.json "$APP/Contents/Resources/English.json"
 /usr/bin/ditto native/Localization/en.lproj "$APP/Contents/Resources/en.lproj"
 /usr/bin/ditto native/Localization/it.lproj "$APP/Contents/Resources/it.lproj"

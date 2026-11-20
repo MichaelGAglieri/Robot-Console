@@ -15,11 +15,13 @@ an external DM542 with unmanaged ENA can retain holding torque.
 
 ## Five-axis DOC model
 
-The bundled URDF is the same illustrative five-axis UR3e adaptation used by the
-DOC presentation and Webots laboratory, with lime/black geometry and the radial
-gripper. It is not physical EB-15 CAD. Nominal offsets align the presentation
-HOME only; verify calibration before physical use. The gripper fingers are
-visual elements, not the J6 channel. Fit view frames the whole model. Drag on the model to orbit, scroll or pinch to
+The bundled URDF is the approved five-axis EB-15 assembly with the EBG-30 gripper,
+generated from ToolBox STL parts for the DOC presentation and Webots laboratory.
+Dimensions are nominal CAD, not measured physical calibration. ToolBox mesh licensing
+(CC BY-NC-ND) must be reviewed before redistribution. The model has the radial
+gripper. Nominal HOME is the upright CAD assembly; this is not a measured
+physical calibration. Verify the reference before physical use. The gripper fingers are
+visual elements, not the J6 channel. Fit view frames the whole model. Use two fingers or drag on the model to orbit. Shift + two fingers pans the view. Pinch or use the mouse wheel to
 zoom, or use ↺/↻ for 15° camera turns. These gestures never command the robot.
 
 Import URDF accepts local, expanded arm descriptions and local STL/OBJ/DAE mesh
@@ -29,7 +31,7 @@ sign/offset and tool position. Disabling a mapped joint blocks dependent command
 sequences and HOME before execution, without electrically disabling the driver.
 Prismatic joints are preview-only with the current rotary firmware backend.
 
-Cartesian IK is position-only and updates preview. Execute displayed target
+Cartesian IK and jog (build 34, [IK_JOG.md](IK_JOG.md)) update the preview only. Execute displayed target
 requires confirmation and physical mapping verification. Motion remains
 sequential, one joint at a time. Workcell boxes use approximate link segments and
 sampled paths: no complete mesh/self-collision or certified physical protection.
@@ -170,3 +172,49 @@ The limits grid fits its content and arranges the six channels in one, two or th
 ## Build 30: joint-speed confirmation
 
 Applied speeds retain two decimal places. Return or ✓ explicitly reconciles the edit state even if the value does not change. Repeated simultaneous moves no longer require reapplying acknowledged speeds; unapplied edits still block the group. Firmware, accelerations and motion planning are unchanged.
+
+## Build 32: work frames and local targets
+
+Under Arm model, expand Work frames and targets. Create a base-relative XYZ/RPY
+frame, save a local target, select it in the scene tree and use Fit view to see its
+3D axes and marker. Projects retain the frames and targets through export/import.
+Schema 1 projects migrate with a dated local recovery copy before schema 2 is saved.
+This is offline geometric metadata: no named-target execution, MoveJ, MoveL or
+orientation-constrained IK is introduced. See [the schema and conventions](WORK_FRAMES.md).
+
+## Build 33: virtual MoveJ and complete guide
+
+The Guide button opens the [complete offline manual](USER_GUIDE.en.md), with 30 chapters,
+a searchable index and text export. The [new MoveJ preview](MOVEJ_PREVIEW.md) builds
+a shared virtual plan from angles, Studio joints, poses or programs, with TCP path,
+duration, peak speeds, timeline and local stop. Physical execution and saved routes
+remain unchanged. Preview only, without serial; no new firmware.
+
+## Build 34: five-axis IK and Cartesian jog
+
+New **IK and Cartesian jog · preview** panel below the 3D arm. Prioritized IK (position,
+then gripper axis, then rotation), several configurations with the closest selected,
+explicit unreachability reasons, singularity warning and XYZ/Rx-Ry-Rz jog in the base,
+work frames or tool. Preview only: no motor commands and no new execution path. See
+[IK_JOG.md](IK_JOG.md).
+
+## Build 35: shared MoveJ execution
+
+**Execute MoveJ…** runs, after confirmation, exactly the plan shown in preview, one
+simultaneous move per segment, waiting for the Mega DONE. **Execute displayed target…**
+uses the same plan and executor. STOP, USB loss and errors interrupt with no automatic
+resume. See [MOVEJ_PREVIEW.md](MOVEJ_PREVIEW.md).
+
+## Build 36: MoveL
+
+**MoveL line** source in the MoveJ panel: a straight TCP line to a point in the base or a
+work frame, split into the simultaneous moves needed to stay within the tolerance, with
+measured deviation, located unreachable section and measured duration during execution.
+See [MOVEL.md](MOVEL.md).
+
+## Build 38: collisions and validation
+
+Capsule geometry derived from each link's meshes, self-collisions, obstacles and the work
+plane z = 0 with an adjustable margin; **Validate program / Validate sequence** simulate the
+taught routes including the return to HOME and point to the problem leg; Play and Run
+program check before starting. See [COLLISIONI.md](COLLISIONI.md).

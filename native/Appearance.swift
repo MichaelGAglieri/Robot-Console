@@ -39,19 +39,36 @@ enum RobotTheme {
  private static func rgb(_ red:CGFloat,_ green:CGFloat,_ blue:CGFloat)->NSColor {
   NSColor(srgbRed:red,green:green,blue:blue,alpha:1)
  }
- // Bright lime accents are shared; text uses adaptive high-contrast ink.
- static let lime = Color(red:0.66,green:1.0,blue:0.16)
- static let accentText = adaptive(light:rgb(0.12,0.14,0.12),dark:rgb(0.66,1.0,0.16))
- static let black = adaptive(light:rgb(0.94,0.96,0.925),dark:rgb(0.035,0.043,0.035))
- static let graphite = adaptive(light:rgb(0.995,1.0,0.985),dark:rgb(0.10,0.115,0.095))
- static let surface = adaptive(light:rgb(0.975,0.985,0.96),dark:rgb(0.065,0.077,0.060))
- static let text = adaptive(light:rgb(0.10,0.135,0.085),dark:rgb(0.94,0.96,0.91))
- static let secondary = adaptive(light:rgb(0.28,0.31,0.28),dark:rgb(0.65,0.69,0.62))
- static let stop = adaptive(light:rgb(0.75,0.14,0.10),dark:rgb(1.0,0.34,0.31))
- static let onStop = adaptive(light:.white,dark:rgb(0.035,0.043,0.035))
+ private static func hex(_ value:UInt32)->NSColor {
+  rgb(CGFloat((value>>16)&0xFF)/255,CGFloat((value>>8)&0xFF)/255,CGFloat(value&0xFF)/255)
+ }
+ // Industrial palette: neutral cool greys, white cards, the DOC lime as brand accent only.
+ // Light-mode text colours keep at least 4.8:1 contrast on every background below.
+ static let lime = Color(nsColor:hex(0xA3EA2F))
+ static let accentText = adaptive(light:hex(0x2B760C),dark:hex(0xA6F43C))
+ static let canvas = adaptive(light:hex(0xE8ECF0),dark:hex(0x0B0E10))
+ // Inset wells inside cards (lists, editors, joint tiles).
+ static let black = adaptive(light:hex(0xF2F4F7),dark:hex(0x12161A))
+ // Sidebars and secondary fills.
+ static let graphite = adaptive(light:hex(0xF6F7F9),dark:hex(0x1C2227))
+ static let surface = adaptive(light:hex(0xFFFFFF),dark:hex(0x171C20))
+ static let border = adaptive(light:hex(0xCDD4DC),dark:hex(0x2C343B))
+ static let text = adaptive(light:hex(0x11161B),dark:hex(0xE7EBEE))
+ static let secondary = adaptive(light:hex(0x4F5A66),dark:hex(0x9AA4AE))
+ static let stop = adaptive(light:hex(0xC62828),dark:hex(0xFF5A52))
+ static let onStop = adaptive(light:.white,dark:hex(0x0B0E10))
+ static let warning = adaptive(light:hex(0xA15C00),dark:hex(0xFFB020))
  // Filled lime buttons retain the robot's bright green in both appearances.
- static let buttonLime = Color(red:0.66,green:1.0,blue:0.16)
- static let ink = Color(red:0.035,green:0.043,blue:0.035)
+ static let buttonLime = Color(nsColor:hex(0xA3EA2F))
+ static let ink = Color(nsColor:hex(0x0B0F0B))
+ // Header bar is dark in both appearances, like a machine control panel.
+ static let header = Color(nsColor:hex(0x14191E))
+ static let headerText = Color(nsColor:hex(0xEEF2F5))
+ static let headerSecondary = Color(nsColor:hex(0x9AA5B0))
+ static let headerControl = Color(nsColor:hex(0x232A31))
+ static let amber = Color(nsColor:hex(0xFFB020))
+ // Selected segments carry white text: a deep green keeps it legible in both appearances.
+ static let control = Color(nsColor:hex(0x2B760C))
 }
 
 struct AppearancePicker:View {

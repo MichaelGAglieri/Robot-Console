@@ -6,20 +6,54 @@ import AppKit
 struct RobotButtonStyle: ButtonStyle {
  var prominent = false
  var danger = false
+ /// Tight horizontal padding for dense grids of short labels.
+ var compact = false
  @Environment(\.isEnabled) private var enabled
  @Environment(\.colorScheme) private var scheme
  func makeBody(configuration:Configuration)->some View {
-  let shape=RoundedRectangle(cornerRadius:9,style:.continuous)
-  let fill=danger ? RobotTheme.stop : (prominent ? RobotTheme.buttonLime : RobotTheme.graphite)
-  let foreground=danger ? RobotTheme.onStop : (prominent ? RobotTheme.ink : RobotTheme.text)
-  let outline=danger ? RobotTheme.stop : (scheme == .light ? RobotTheme.secondary : RobotTheme.lime)
+  let shape=RoundedRectangle(cornerRadius:7,style:.continuous)
+  let fill=danger ? RobotTheme.stop : (prominent ? RobotTheme.buttonLime : RobotTheme.surface)
+  let foreground=danger ? Color.white : (prominent ? RobotTheme.ink : RobotTheme.text)
+  let outline=danger ? RobotTheme.stop : (prominent ? Color.black.opacity(0.18) : RobotTheme.border)
   return configuration.label
    .font(.system(size:13,weight:.semibold))
-   .padding(.horizontal,14).padding(.vertical,9)
-   .foregroundStyle(foreground.opacity(enabled ? 1 : (scheme == .light ? 0.70 : 0.45)))
-   .background(shape.fill(fill.opacity(enabled ? (configuration.isPressed ? 0.82 : 1) : (scheme == .light ? 0.60 : 0.18))))
-   .overlay(shape.strokeBorder(outline.opacity(enabled ? (scheme == .light ? 0.48 : 0.40) : (scheme == .light ? 0.24 : 0.10)),lineWidth:1))
+   .padding(.horizontal,compact ? 4 : 13).padding(.vertical,7)
+   .foregroundStyle(foreground.opacity(enabled ? 1 : 0.45))
+   .background(shape.fill(fill.opacity(enabled ? 1 : (prominent || danger ? 0.45 : 0.7))))
+   .overlay(shape.fill(Color.black.opacity(configuration.isPressed ? (scheme == .light ? 0.07 : 0.18) : 0)))
+   .overlay(shape.strokeBorder(outline.opacity(enabled ? 1 : 0.6),lineWidth:1))
+   .shadow(color:.black.opacity(scheme == .light && enabled && !configuration.isPressed ? 0.06 : 0),radius:1,y:1)
    .contentShape(shape)
+ }
+}
+
+/// Controls on the dark header bar, identical in both appearances.
+struct HeaderButtonStyle: ButtonStyle {
+ @Environment(\.isEnabled) private var enabled
+ func makeBody(configuration:Configuration)->some View {
+  let shape=RoundedRectangle(cornerRadius:7,style:.continuous)
+  return configuration.label
+   .font(.system(size:12.5,weight:.semibold))
+   .padding(.horizontal,11).padding(.vertical,6)
+   .foregroundStyle(RobotTheme.headerText.opacity(enabled ? 1 : 0.45))
+   .background(shape.fill(RobotTheme.headerControl.opacity(configuration.isPressed ? 0.6 : 1)))
+   .overlay(shape.strokeBorder(Color.white.opacity(0.10),lineWidth:1))
+   .contentShape(shape)
+ }
+}
+
+/// Small status capsule used in the header bar.
+struct StatusChip:View {
+ let text:String;let color:Color;var filled=false
+ var body:some View {
+  HStack(spacing:7) {
+   Circle().fill(filled ? RobotTheme.ink : color).frame(width:7,height:7)
+   RText(text).font(.system(size:11.5,weight:.bold)).tracking(0.6)
+  }
+  .foregroundStyle(filled ? RobotTheme.ink : RobotTheme.headerText)
+  .padding(.horizontal,11).padding(.vertical,6)
+  .background(filled ? color : color.opacity(0.12),in:Capsule())
+  .overlay(Capsule().stroke(color.opacity(filled ? 0 : 0.45),lineWidth:1))
  }
 }
 
@@ -27,12 +61,22 @@ struct Pose: Decodable { let name: String; let pos: [Double]; let dwell: Double;
  var isEnabled: Bool {enabled ?? true}
 }
 struct RobotEvent:Decodable,Identifiable {let id:Int;let time:Double;let mode:String;let text:String}
+struct SequenceMotion: Decodable {
+ let mode:String
+ let order:[Int]
+ let pauses:[Double]
+ static let standard=SequenceMotion(mode:"simultaneous",order:Array(0..<6),pauses:Array(repeating:0,count:6))
+ var ordered:Bool {mode=="ordered"}
+ var jointOrder:String {order.map{"J\($0+1)"}.joined(separator:" → ")}
+}
 struct RobotState: Decodable {
  var robot_events:[RobotEvent]? = nil
  var mode: String; var connected: Bool; var home: Bool; var pos: [Double]
  var limits: [[Double]]; var trail: Int; var sequence: [Pose]; var events: [String]
  var busy: Bool; var playing: Bool; var paused: Bool; var error: String; var grip: String
  var hardware_ok:Bool? = nil
+ var sequence_motion:SequenceMotion? = nil
+ var operator_collision_checks:Bool? = nil
  var multi_axis:Bool? = nil
  var active_axes:[Int]? = nil
  var axis_speeds:[Double]? = nil
@@ -77,6 +121,8 @@ struct MultiPlan:Decodable {
  static func invalid(_ error:String)->MultiPlan{MultiPlan(valid:false,error:error,deltas:[],targets:[],axes:[],requested:[],effective:[],peaks:[],duration:0,budget_limited:false,context:"")}
 }
 struct Reply: Decodable {
+ let jarvis_quit:Bool?
+ let jarvis_connection:[String:String]?
  let home_preview:HomePreview?
  let multi_plan:MultiPlan?
  let voice_command:VoiceCommand?
@@ -108,6 +154,7 @@ struct Reply: Decodable {
  @Published var firmwareFile="RegiaDemo.ino"
  @Published var firmwareText=""
  @Published var studio:StudioState?
+ @Published var confirmOperatorWarnings=false
  @Published var confirmStudioTarget=false
  @Published var confirmStudioProgram=false
  @Published var keyboardAxis=0
@@ -144,6 +191,10 @@ struct Reply: Decodable {
  @Published var maxima = Array(repeating:"0",count:6)
  @Published var confirmConnect = false
  @Published var confirmHome = false
+ @Published var sequenceReturnHome=false
+ @Published var sequenceContext=""
+ @Published var homeContext=""
+ @Published var confirmReturnHome=false
  @Published var confirmPlay = false
  @Published var confirmClear = false
  @Published var confirmQuit = false
@@ -157,10 +208,11 @@ struct Reply: Decodable {
  var input: FileHandle?
  var output: FileHandle?
  var pendingPoll = false
+ var jarvisQuitting = false
  let lineReader=BridgeLineReader()
  var delegate: AppDelegate?
  var idle: Bool { !state.busy && !state.playing }
- var zero: Bool { state.home && state.trail == 0 && state.pos.allSatisfy { abs($0)<0.01 } }
+ var zero: Bool { state.home && state.pos.allSatisfy { abs($0)<0.01 } }
  init() {
   do {
    let p = Process(), a = Pipe(), b = Pipe()
@@ -192,6 +244,7 @@ struct Reply: Decodable {
  func send(_ op:String,_ values:[String:Any]=[:],poll:Bool=false,completion:((Bool)->Void)?=nil) {
   guard let input, let output else {completion?(false);return}
   var request=values;request["op"]=op;request["language"]=AppLanguage.current.rawValue
+  request["jarvis_ui"]=["speed_pending":!speedEdits.isEmpty,"return_home":sequenceReturnHome]
   guard let data=try? JSONSerialization.data(withJSONObject:request) else{completion?(false);return}
   let lineReader=self.lineReader
   queue.async { [weak self] in
@@ -202,6 +255,10 @@ struct Reply: Decodable {
     Task { @MainActor [weak self] in
      guard let self else{return}
      if let s=reply.state { self.state=s }
+     if let connection=reply.jarvis_connection {
+      self.mode=connection["mode"] ?? self.mode;self.port=connection["port"] ?? self.port
+      self.minima=Array(repeating:"0",count:6);self.maxima=self.minima;self.speedDraft=5
+     }
      if let home=reply.home_preview,(values["revision"] as? Int)==self.homeRevision {self.homePreview=home}
      if let plan=reply.multi_plan,(values["revision"] as? Int)==self.multiRevision {self.multiPlan=plan}
      if let command=reply.voice_command {self.voiceCommand=command}
@@ -224,6 +281,7 @@ struct Reply: Decodable {
      if let e=reply.error {self.message=e;if op == "home" || op == "end_cycle" {self.returningToQuit=false;NSApp.reply(toApplicationShouldTerminate:false)}} else if !poll || self.message == "Avvio del controllo locale…" {self.message=""}
      completion?(reply.error == nil)
      if poll { self.pendingPoll=false }
+     if reply.jarvis_quit == true && !self.jarvisQuitting {self.jarvisQuitting=true;self.quit()}
      if op == "home" && reply.error == nil && self.returningToQuit { self.returnRequestAccepted=true }
      if self.returningToQuit && self.returnRequestAccepted && self.idle {
       self.returningToQuit=false
@@ -273,7 +331,8 @@ struct Reply: Decodable {
  }
  var limitsMode:String {state.connected ? state.mode : mode}
  func restoreLimits() {
-  guard let limits=lastLimits[limitsMode],limits.count==5 else{return}
+  guard var limits=lastLimits[limitsMode],limits.count==5 || limits.count==6 else{return}
+  if limits.count==5{limits.append([0,0])}
   for i in 0..<6 {minima[i]=String(format:"%g",limits[i][0]);maxima[i]=String(format:"%g",limits[i][1])}
   message="Ultimi limiti recuperati nei campi: premi Applica limiti per usarli."
  }
@@ -306,7 +365,7 @@ struct Reply: Decodable {
  func refreshMultiPlan(){
   multiRevision+=1;multiRefresh?.cancel();multiPlan=nil
   guard multiMode else{return}
-  let values=multiDrafts.map{Double($0.replacingOccurrences(of:",",with:"."))}
+  let values=multiDrafts.map{InputDraft.number($0)}
   guard values.allSatisfy({$0 != nil && $0!.isFinite && abs($0!)<=360}) else {multiPlan = .invalid(T("Inserisci sei angoli validi da −360° a +360°."));return}
   let revision=multiRevision
   let task=DispatchWorkItem{[weak self] in
@@ -315,7 +374,7 @@ struct Reply: Decodable {
   }
   multiRefresh=task;DispatchQueue.main.asyncAfter(deadline:.now()+0.15,execute:task)
  }
- func keyboardJog(_ sign:Double){if keyboardEnabled && !multiMode && canJog(keyboardAxis,sign){send("jog",["axis":keyboardAxis,"delta":sign*step])}}
+ func keyboardJog(_ sign:Double){if NSApp.keyWindow?.firstResponder is NSTextView || NSApp.keyWindow?.firstResponder is NSTextField || NSApp.keyWindow?.attachedSheet != nil{return};if keyboardEnabled && !multiMode && canJog(keyboardAxis,sign){send("jog",["axis":keyboardAxis,"delta":sign*step])}}
  func canJog(_ axis:Int,_ sign:Double)->Bool {
   guard state.connected,state.identified,state.speed_confirmed,state.home,idle,!firmware.busy else {return false}
   if state.axes_available?[axis] == false || state.axes_enabled?[axis] == false || state.hardware_ok == false{return false}
@@ -326,7 +385,19 @@ struct Reply: Decodable {
   guard let folder=Bundle.main.resourceURL?.appendingPathComponent("RegiaDemo") else{return}
   NSWorkspace.shared.selectFile(folder.appendingPathComponent("RegiaDemo.ino").path,inFileViewerRootedAtPath:folder.path)
  }
- func play(_ loop:Bool) {repeatPlay=loop;confirmPlay=true}
+ func play(_ loop:Bool) {
+  guard speedEdits.isEmpty else{message=T("Applica le velocità modificate prima di pianificare.");return}
+  repeatPlay=loop
+  send("studio_movej_plan",["source":"sequence","return_home":sequenceReturnHome]){ok in
+   if ok,let context=self.studio?.movej_preview?.plan?.controller_context{self.sequenceContext=context;self.confirmPlay=true}
+  }
+ }
+ func prepareHome(){
+  guard speedEdits.isEmpty else{message=T("Applica le velocità modificate prima di pianificare.");return}
+  send("studio_movej_plan",["source":"home"]){ok in
+   if ok,let context=self.studio?.movej_preview?.plan?.controller_context{self.homeContext=context;self.confirmReturnHome=true}
+  }
+ }
  func requestQuit() {
   if firmware.busy {message="Attendi la conclusione dell’operazione firmware prima di chiudere.";NSApp.reply(toApplicationShouldTerminate:false);return}
   if !state.connected || (idle && zero) {quit()} else {confirmQuit=true}
@@ -344,7 +415,7 @@ struct Reply: Decodable {
    }
   }
  }
- func finishCycleAndQuit() { returningToQuit=true;returnRequestAccepted=true;send("end_cycle") }
+ func finishCycleAndQuit() { returningToQuit=true;returnRequestAccepted=true;send("end_cycle",["return_home":true]) }
  func returnAndQuit() { returningToQuit=true;returnRequestAccepted=false;send("home") }
 }
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
@@ -371,21 +442,27 @@ struct Panel<Content:View>:View {
  @State private var naturalHeight:CGFloat=1
  @State private var dragStart:CGFloat?
  @State private var hovering=false
- init(title:String,@ViewBuilder content:()->Content) {
-  self.title=title;self.content=content()
+ /// false: the card always shows its whole content (used when a child has its own resize handle).
+ let resizable:Bool
+ init(title:String,resizable:Bool=true,@ViewBuilder content:()->Content) {
+  self.title=title;self.resizable=resizable;self.content=content()
   self._storedHeight=AppStorage(wrappedValue:0,"RobotConsole.PanelHeight."+title)
  }
- private var visibleHeight:CGFloat {storedHeight>0 ? min(CGFloat(storedHeight),max(1,naturalHeight)) : max(1,naturalHeight)}
+ private var visibleHeight:CGFloat {resizable && storedHeight>0 ? min(CGFloat(storedHeight),max(1,naturalHeight)) : max(1,naturalHeight)}
  private func resize(_ height:CGFloat) {storedHeight=Double(min(1600,max(28,height)))}
  var body:some View {
   VStack(alignment:.leading,spacing:14) {
-   HStack(spacing:10) {
-    RoundedRectangle(cornerRadius:2).fill(RobotTheme.lime).frame(width:3,height:18)
-    RText(title).font(.headline)
+   HStack(spacing:9) {
+    RoundedRectangle(cornerRadius:1).fill(RobotTheme.lime).frame(width:3,height:14)
+    RText(title).font(.system(size:12,weight:.bold)).textCase(.uppercase).tracking(1.1).foregroundStyle(RobotTheme.text)
     Spacer()
-    Button("Adatta"){storedHeight=0}.robotCaption().disabled(storedHeight<=0)
-     .accessibilityLabel(T("Adatta altezza di "+title)).help("Ripristina l’altezza naturale del contenuto")
+    if resizable && storedHeight>0 {
+     Button{storedHeight=0}label:{RText("Adatta")}.buttonStyle(.plain).robotCaption(small:true).foregroundStyle(RobotTheme.accentText)
+      .accessibilityLabel(T("Adatta altezza di "+title)).help("Ripristina l’altezza naturale del contenuto")
+    }
    }
+   .padding(.bottom,10)
+   .overlay(alignment:.bottom){Rectangle().fill(RobotTheme.border.opacity(0.7)).frame(height:1).padding(.horizontal,-20)}
    ScrollView(.vertical) {
     VStack(alignment:.leading,spacing:16){content}
      .frame(width:max(1,panelWidth-44),alignment:.leading)
@@ -396,10 +473,10 @@ struct Panel<Content:View>:View {
    .scrollIndicators(.visible)
    .scrollBounceBehavior(.basedOnSize)
    .onPreferenceChange(PanelContentHeight.self){height in if abs(height-naturalHeight)>0.5 {naturalHeight=height}}
+   if resizable {
    HStack(spacing:8) {
     Spacer()
-    RoundedRectangle(cornerRadius:2).fill(RobotTheme.lime.opacity(hovering ? 0.85 : 0.28)).frame(width:44,height:3)
-    Image(systemName:"arrow.up.and.down").font(.system(size:9,weight:.semibold)).foregroundStyle(hovering ? RobotTheme.lime : RobotTheme.secondary)
+    Capsule().fill(hovering ? RobotTheme.accentText.opacity(0.7) : RobotTheme.border).frame(width:36,height:4)
     Spacer()
    }
    .frame(maxWidth:.infinity).frame(height:16).contentShape(Rectangle())
@@ -425,9 +502,11 @@ struct Panel<Content:View>:View {
      @unknown default:break
     }
    }
-  }.padding(22).frame(maxWidth:.infinity,alignment:.leading)
-   .background(LinearGradient(colors:[RobotTheme.graphite,RobotTheme.surface],startPoint:.topLeading,endPoint:.bottomTrailing),in:RoundedRectangle(cornerRadius:18))
-   .overlay(RoundedRectangle(cornerRadius:18).stroke(RobotTheme.lime.opacity(0.18),lineWidth:1))
+   }
+  }.padding(.horizontal,20).padding(.top,16).padding(.bottom,6).frame(maxWidth:.infinity,alignment:.leading)
+   .background(RobotTheme.surface,in:RoundedRectangle(cornerRadius:12,style:.continuous))
+   .overlay(RoundedRectangle(cornerRadius:12,style:.continuous).strokeBorder(RobotTheme.border,lineWidth:1))
+   .shadow(color:.black.opacity(0.05),radius:6,y:2)
  }
 }
 struct FirmwarePanel:View {
@@ -599,7 +678,7 @@ struct MotionPanel:View {
     HStack {Button("Applica a tutti"){m.send("set_speed",["speed":m.speedDraft])}.disabled(!m.state.connected || !m.state.identified || !m.idle);RText("Stesse velocità per comandi singoli, simultanei e pose").robotCaption().foregroundStyle(RobotTheme.secondary)}
    }.disabled(!m.idle)
    Divider()
-   Picker("Comando dei giunti",selection:$m.multiMode){RText("Singolo").tag(false);RText("Simultaneo").tag(true)}.pickerStyle(.segmented).disabled(!m.idle)
+   Picker("Comando dei giunti",selection:$m.multiMode){RText("Singolo").tag(false);RText("Simultaneo").tag(true)}.pickerStyle(.segmented).tint(RobotTheme.control).disabled(!m.idle)
    if !m.multiMode {
    ViewThatFits(in:.horizontal) {
     HStack {
@@ -624,8 +703,8 @@ struct MotionPanel:View {
    }
    LazyVGrid(columns:Array(repeating:GridItem(.flexible(),spacing:6),count:innerWidth<800 ? 8 : 15),spacing:6) {
     ForEach([1.0,2,5,10,15,20,30,45,60,90,120,150,180,270,360],id:\.self){amount in
-     Button{m.selectStep(amount)}label:{RText("\(amount,specifier:"%.0f")°").lineLimit(1).minimumScaleFactor(0.8).frame(maxWidth:.infinity)}
-      .buttonStyle(RobotButtonStyle(prominent:m.step==amount)).accessibilityLabel("Spostamento \(Int(amount)) gradi")
+     Button{m.selectStep(amount)}label:{RText("\(amount,specifier:"%.0f")°").monospacedDigit().lineLimit(1).minimumScaleFactor(0.75).frame(maxWidth:.infinity)}
+      .buttonStyle(RobotButtonStyle(prominent:m.step==amount,compact:true)).accessibilityLabel("Spostamento \(Int(amount)) gradi")
     }
    }
    }
@@ -687,7 +766,7 @@ struct MultiJointControls:View {
      .disabled(!m.state.home || !m.idle || m.multiPlan?.valid != true || !m.speedEdits.isEmpty)
     Button("Azzera spostamenti"){m.multiDrafts=Array(repeating:"0",count:6)}.disabled(!m.idle)
    }
-   RText("Registra posa conserva il gruppo simultaneo. Le vecchie pose mantengono il percorso originale. Nessun controllo collisioni su questi movimenti.").robotCaption().foregroundStyle(RobotTheme.secondary)
+   RText("Registra posa conserva il gruppo simultaneo. Le sequenze collegano le pose attive direttamente. I comandi manuali simultanei rispettano limiti e velocità, senza controllo collisioni del modello.").robotCaption().foregroundStyle(RobotTheme.secondary)
   }.padding(12).background(RobotTheme.black,in:RoundedRectangle(cornerRadius:12))
    .alert("Esegui movimento simultaneo?",isPresented:$confirm){
     Button("Esegui"){if let plan=pending {m.send("multi_jog",["deltas":plan.deltas,"context":plan.context])}}
@@ -795,6 +874,7 @@ struct JointControlCard:View {
  @State private var speedText="5"
  @State private var sliding=false
  @State private var confirmRelease=false
+ @FocusState private var speedFocused:Bool
  var enabled:Bool {m.state.axes_enabled?[axis] ?? true}
  var supported:Bool {m.state.mode=="demo" || m.state.axis_control==true}
  var canRelease:Bool {m.state.mode=="robot" && m.state.connected && m.state.drive_caps?[axis]==true && m.state.drive_state?[axis] != false}
@@ -812,7 +892,7 @@ struct JointControlCard:View {
  // so onChange(speedText) alone cannot clear a previously dirty field.
  func reconcileSpeedEdit() {
   let applied=min(m.state.axis_speeds?[axis] ?? 5,m.state.max_speed)
-  if let value=Double(speedText.replacingOccurrences(of:",",with:".")),value.isFinite,abs(value-applied)<0.005 {
+  if let value=InputDraft.number(speedText),value.isFinite,abs(value-applied)<0.005 {
    m.speedEdits.remove(axis)
   }else{m.speedEdits.insert(axis)}
  }
@@ -824,7 +904,7 @@ struct JointControlCard:View {
  }
  func applySpeed() {
   let submitted=speedText
-  guard let value=Double(submitted.replacingOccurrences(of:",",with:".")),value.isFinite,value>=1,value<=m.state.max_speed else {m.message=T("Velocità da 1 al massimo indicato, in gradi/s.");return}
+  guard let value=InputDraft.number(submitted),value.isFinite,value>=1,value<=m.state.max_speed else {m.message=T("Velocità da 1 al massimo indicato, in gradi/s.");return}
   speed=value
   m.send("set_axis_speed",["axis":axis,"speed":value]){ok in
    guard ok else{return}
@@ -859,7 +939,7 @@ struct JointControlCard:View {
    }
    RText(m.multiMode ? "Velocità massima" : "Velocità").robotCaption(small:true).foregroundStyle(RobotTheme.secondary)
    HStack(spacing:4) {
-    TextField("°/s",text:$speedText).frame(width:52).onSubmit{applySpeed()}.accessibilityLabel(T("Velocità J")+String(axis+1))
+    TextField("°/s",text:$speedText).frame(width:72).focused($speedFocused).onSubmit{applySpeed()}.accessibilityLabel(T("Velocità J")+String(axis+1))
     RText("°/s").robotCaption()
     Spacer(minLength:0)
     Button{applySpeed()}label:{Image(systemName:"checkmark")}.help("Applica velocità giunto")
@@ -877,8 +957,8 @@ struct JointControlCard:View {
    .onAppear{syncSpeed()}
    .onChange(of:speedText){_,_ in reconcileSpeedEdit()}
    .onDisappear{m.speedEdits.remove(axis)}
-   .onChange(of:m.state.axis_speeds?[axis]){_,_ in if !sliding {syncSpeed()}}
-   .onChange(of:m.state.max_speed){_,_ in if !sliding {syncSpeed()}}
+   .onChange(of:m.state.axis_speeds?[axis]){_,_ in if !sliding && !speedFocused && !m.speedEdits.contains(axis) {syncSpeed()}}
+   .onChange(of:m.state.max_speed){_,_ in if !sliding && !speedFocused && !m.speedEdits.contains(axis) {syncSpeed()}}
    .alert("Rilascia la tenuta del giunto?",isPresented:$confirmRelease){
     Button("Disabilita ENABLE",role:.destructive){m.send("joint_enable",["axis":axis,"enabled":false])}
     Button("Annulla",role:.cancel){}
@@ -889,7 +969,7 @@ struct OperatorNotes:View {
  @AppStorage("RobotConsole.OperatorNotes") private var notes=""
  var body:some View {
   VStack(alignment:.leading,spacing:12) {
-   Label{RText("Note operatore").font(.headline)}icon:{Image(systemName:"note.text")}.foregroundStyle(RobotTheme.accentText)
+   Label{RText("Note operatore").font(.system(size:12,weight:.bold)).textCase(.uppercase).tracking(1.1)}icon:{Image(systemName:"note.text").foregroundStyle(RobotTheme.accentText)}.foregroundStyle(RobotTheme.text)
    RText("Appunti, misure e idee per la sessione.").robotCaption().foregroundStyle(RobotTheme.secondary)
    TextEditor(text:$notes).font(.system(size:13)).scrollContentBackground(.hidden).padding(8).background(RobotTheme.black,in:RoundedRectangle(cornerRadius:10)).accessibilityLabel(T("Note operatore"))
    RText("Salvate automaticamente su questo Mac. Restano separate dai progetti esportati e dalla memoria dell’IA.").robotCaption(small:true).foregroundStyle(RobotTheme.secondary).fixedSize(horizontal:false,vertical:true)
@@ -925,10 +1005,10 @@ struct PoseEditor:View {
   error=""
   let cleanName=name.trimmingCharacters(in:.whitespacesAndNewlines)
   guard !cleanName.isEmpty,cleanName.count<=60 else {error="Scrivi un nome da 1 a 60 caratteri.";return}
-  guard let seconds=Double(dwell.replacingOccurrences(of:",",with:".")),seconds.isFinite,(0...60).contains(seconds) else {error="Pausa da 0 a 60 secondi.";return}
+  guard let seconds=InputDraft.number(dwell),seconds.isFinite,(0...60).contains(seconds) else {error="Pausa da 0 a 60 secondi.";return}
   var values=[Double]()
   for (i,text) in angles.enumerated() {
-   guard let v=Double(text.replacingOccurrences(of:",",with:".")),v.isFinite,(-360...360).contains(v) else {error="J\(i+1): inserisci un angolo da −360° a +360°.";return}
+   guard let v=InputDraft.number(text),v.isFinite,(-360...360).contains(v) else {error="J\(i+1): inserisci un angolo da −360° a +360°.";return}
    values.append((v*100).rounded()/100)
   }
   saving=true
@@ -948,17 +1028,84 @@ struct PoseEditor:View {
     }
    }
    HStack {RText("Pausa");TextField("Secondi",text:$dwell).frame(width:90).accessibilityLabel("Pausa della posa");RText("secondi");Spacer();Picker("Pinza",selection:$grip) {RText("Apri").tag("apri");RText("Chiudi").tag("chiudi");RText("Mantieni").tag("non comandata")}.frame(width:210)}
-   RText("Salvare modifica la sequenza. Gli angoli nuovi vengono raggiunti dal percorso originale, correggendo J1–J6 in quest’ordine. Verifica questi tratti prima di riprodurli sul robot; i limiti saranno ricontrollati all’avvio.").robotCaption().foregroundStyle(RobotTheme.secondary).fixedSize(horizontal:false,vertical:true)
+   RText("Salvare modifica la sequenza. Gli angoli nuovi sostituiscono il target della posa; il collegamento alla posa successiva è diretto e simultaneo. Verifica questi tratti prima di riprodurli sul robot; i limiti saranno ricontrollati all’avvio.").robotCaption().foregroundStyle(RobotTheme.secondary).fixedSize(horizontal:false,vertical:true)
    if !error.isEmpty {RText(error).foregroundStyle(RobotTheme.stop).font(.callout).fixedSize(horizontal:false,vertical:true)}
    HStack {Button("Annulla"){dismiss()}.disabled(saving);Spacer();Button(saving ? "Salvataggio…" : "Salva modifiche"){save()}.buttonStyle(RobotButtonStyle(prominent:true)).disabled(saving || !m.idle || m.firmware.busy)}
   }.padding(26).frame(width:680).background(RobotTheme.surface).foregroundStyle(RobotTheme.text).tint(RobotTheme.accentText).buttonStyle(RobotButtonStyle())
  }
 }
+struct SequenceMotionEditor:View {
+ @ObservedObject var m:Regia
+ @Environment(\.dismiss) private var dismiss
+ @State private var mode:String
+ @State private var order:[Int]
+ @State private var pauseText:[String]
+ @State private var saving=false
+ init(m:Regia,motion:SequenceMotion){
+  self.m=m
+  _mode=State(initialValue:motion.mode)
+  _order=State(initialValue:motion.order)
+  _pauseText=State(initialValue:motion.pauses.map{String(format:"%g",$0)})
+ }
+ private var pauses:[Double]? {
+  let values=pauseText.compactMap(InputDraft.number)
+  guard values.count==6,values.allSatisfy({(0...60).contains($0)}) else{return nil}
+  return values
+ }
+ var body:some View {
+  VStack(alignment:.leading,spacing:14){
+   RText("Ordine dei giunti nella sequenza").font(.title2.bold())
+   Picker("Movimento tra le pose",selection:$mode){
+    RText("Simultaneo").tag("simultaneous")
+    RText("Un giunto alla volta").tag("ordered")
+   }.pickerStyle(.segmented)
+   RText("L’ordine vale per ogni passaggio tra le pose e per il ritorno a HOME se selezionato a fine ciclo.").robotCaption().foregroundStyle(RobotTheme.secondary)
+   if mode=="ordered" {
+    ForEach(Array(order.enumerated()),id:\.element){index,axis in
+     HStack(spacing:10){
+      Text("\(index+1).").monospacedDigit().frame(width:24,alignment:.trailing)
+      Text("J\(axis+1)").bold()
+      Spacer()
+      RText("Pausa dopo il giunto")
+      TextField(T("Secondi"),text:$pauseText[axis]).frame(width:65)
+       .accessibilityLabel(Text(String(format:T("Pausa dopo J%lld"),axis+1)))
+      RText("s")
+      Button{order.swapAt(index,index-1)}label:{Image(systemName:"arrow.up")}
+       .accessibilityLabel(Text(String(format:T("Sposta J%lld prima"),axis+1))).disabled(index==0)
+      Button{order.swapAt(index,index+1)}label:{Image(systemName:"arrow.down")}
+       .accessibilityLabel(Text(String(format:T("Sposta J%lld dopo"),axis+1))).disabled(index==order.count-1)
+     }
+    }
+    RText("Pausa da 0 a 60 secondi. Si applica solo quando c’è un altro giunto da muovere.").robotCaption().foregroundStyle(pauses==nil ? .orange : RobotTheme.secondary)
+   }
+   if !m.message.isEmpty{RText(m.message).robotCaption().foregroundStyle(RobotTheme.stop)}
+   HStack {
+    Spacer()
+    Button("Annulla"){dismiss()}.keyboardShortcut(.cancelAction)
+    Button("Salva"){
+     guard let pauses else{return}
+     saving=true
+     m.send("studio_sequence_motion",["motion":["mode":mode,"order":order,"pauses":pauses]]){ok in
+      saving=false
+      if ok{dismiss()}
+     }
+    }.keyboardShortcut(.defaultAction).disabled(pauses==nil || !m.idle)
+   }
+  }.padding(22).frame(width:550).disabled(saving)
+ }
+}
 struct SequencePanel:View {
  @ObservedObject var m:Regia
  @State private var editing:PoseEditRequest?
+ @State private var editingMotion=false
+ private var motion:SequenceMotion {m.state.sequence_motion ?? .standard}
  var body:some View {
   Panel(title:"La tua sequenza") {
+   HStack(spacing:12){
+    Button("Ordine dei giunti…"){editingMotion=true}.disabled(!m.idle)
+    RText(motion.ordered ? "Un giunto alla volta" : "Simultaneo").robotCaption()
+    if motion.ordered{Text(motion.jointOrder).font(.caption.monospacedDigit())}
+   }
    HStack(spacing:12) {
     TextField("Nome posa",text:$m.name)
     RText("Pausa").robotCaption()
@@ -970,8 +1117,8 @@ struct SequencePanel:View {
     Button("＋ Registra posa"){m.recordPose()}.buttonStyle(RobotButtonStyle(prominent:true)).disabled(!m.state.home || !m.idle)
    }
    RText(!m.state.home ? "Conferma HOME e applica i limiti per muovere il robot e registrare le pose." : "Muovi con − e +, poi registra la posa con tutti e sei i giunti e la richiesta della pinza.").robotCaption().foregroundStyle(RobotTheme.secondary)
-   RText("La pinza viene comandata all’arrivo nella posa. Il riordino ripercorre i tratti insegnati, anche a ritroso; può passare da HOME. Mantieni non invia comandi alla pinza.").robotCaption().foregroundStyle(RobotTheme.secondary)
-   RText("\(m.state.sequence.filter{$0.isEnabled}.count) di \(m.state.sequence.count) pose abilitate. Una posa esclusa salta pausa e pinza; il percorso verso altre pose può comunque attraversarla.").robotCaption().foregroundStyle(RobotTheme.secondary)
+   RText("La pinza viene comandata all’arrivo nella posa. Solo le pose attive sono destinazioni; i vecchi passaggi registrati non vengono riprodotti. Mantieni non invia comandi alla pinza.").robotCaption().foregroundStyle(RobotTheme.secondary)
+   RText("\(m.state.sequence.filter{$0.isEnabled}.count) di \(m.state.sequence.count) pose abilitate. Le pose escluse non aggiungono tappe, pausa o pinza.").robotCaption().foregroundStyle(RobotTheme.secondary)
    Button("Annulla ultima modifica pose"){m.send("pose_undo",["revision":m.state.sequence_revision])}.disabled(!m.idle || !m.state.can_undo)
    if m.state.sequence.isEmpty {
     HStack {
@@ -1004,18 +1151,34 @@ struct SequencePanel:View {
      }
     }
    }
+   HStack(spacing:10){
+    Button("Anteprima sequenza"){m.send("studio_movej_plan",["source":"sequence","return_home":m.sequenceReturnHome])}
+     .disabled(!m.idle || !m.speedEdits.isEmpty || !m.state.sequence.contains(where:{$0.isEnabled}) || m.studio?.movej_preview?.running == true)
+    if let playback=m.studio?.movej_preview,let plan=playback.plan,plan.source=="sequence",playback.valid{
+     if playback.running {
+      Button("Arresta anteprima"){m.send("studio_movej_stop")}
+     }else{
+      Button("Riproduci anteprima"){m.send("studio_movej_play",["id":plan.id])}.disabled(!m.idle)
+     }
+     Text(String(format:T("Durata stimata %.1f s"),plan.duration)).font(.caption.monospacedDigit())
+    }
+   }
+   if motion.ordered{RText("La vista 3D mostra i giunti associati al modello.").robotCaption().foregroundStyle(RobotTheme.secondary)}
+   if m.state.operator_collision_checks == false{RText("Operatore · interferenze modello SOLO AVVISI").foregroundStyle(.orange)}
+   Toggle(isOn:$m.sequenceReturnHome){RText("Torna a HOME a fine sequenza")}.disabled(!m.idle)
    HStack(spacing:10) {
     Button("▶ Una volta"){m.play(false)}.buttonStyle(RobotButtonStyle(prominent:true)).disabled(!m.state.home || !m.idle || !m.state.sequence.contains(where:{$0.isEnabled}))
     Button("↻ Ripeti"){m.play(true)}.disabled(!m.state.home || !m.idle || !m.state.sequence.contains(where:{$0.isEnabled}))
     Button(m.state.paused ? "Riprendi" : "Pausa"){m.send("pause")}.disabled(!m.state.playing)
-    if m.state.playing {Button("Termina al prossimo HOME"){m.send("end_cycle")}}
+    if m.state.playing {Button("Termina questo ciclo"){m.send("end_cycle")}}
     Spacer()
-    Button("↶ HOME"){m.send("home")}.disabled(!m.state.home || !m.idle)
-    Button("Svuota"){m.confirmClear=true}.disabled(!m.state.home || !m.idle)
+    Button("Vai a HOME…"){m.prepareHome()}.disabled(!m.state.home || !m.idle)
+    Button("Svuota"){m.confirmClear=true}.disabled(!m.idle)
    }
-   RText("Ogni ciclo ripercorre i movimenti al contrario fino a HOME. La pinza mantiene l’ultima richiesta.").robotCaption().foregroundStyle(RobotTheme.secondary)
+   RText("Il ciclo parte dalla posizione attuale e termina sull’ultima posa. Il ritorno a HOME avviene se selezionato. La pinza mantiene l’ultima richiesta.").robotCaption().foregroundStyle(RobotTheme.secondary)
   }.disabled(m.firmware.busy)
   .sheet(item:$editing) {request in PoseEditor(m:m,request:request)}
+  .sheet(isPresented:$editingMotion){SequenceMotionEditor(m:m,motion:motion)}
  }
 }
 struct SessionSidebar:View {
@@ -1023,7 +1186,7 @@ struct SessionSidebar:View {
  @State private var follow=true
  var body:some View {
   VStack(alignment:.leading,spacing:12) {
-   Label{RText("Attività del robot").font(.headline)}icon:{Image(systemName:"list.bullet.rectangle")}.foregroundStyle(RobotTheme.accentText)
+   Label{RText("Attività del robot").font(.system(size:12,weight:.bold)).textCase(.uppercase).tracking(0.8).lineLimit(1).minimumScaleFactor(0.8)}icon:{Image(systemName:"list.bullet.rectangle").foregroundStyle(RobotTheme.accentText)}.foregroundStyle(RobotTheme.text)
    RText(m.connectionStatus).robotCaption().foregroundStyle(RobotTheme.secondary)
    Toggle("Segui ultimi eventi",isOn:$follow).robotCaption().toggleStyle(.checkbox)
    ScrollViewReader {proxy in
@@ -1059,7 +1222,7 @@ struct SidebarDivider:View {
  let leading:Bool
  @State private var initial:Double?
  var body:some View {
-  Rectangle().fill(RobotTheme.lime.opacity(0.16)).frame(width:5).contentShape(Rectangle())
+  Rectangle().fill(Color.clear).frame(width:5).overlay(Rectangle().fill(RobotTheme.border).frame(width:1)).contentShape(Rectangle())
    .onHover{inside in if inside {NSCursor.resizeLeftRight.push()}else{NSCursor.pop()}}
    .gesture(DragGesture(minimumDistance:1,coordinateSpace:.global)
     .onChanged{value in if initial==nil {initial=width};width=min(340,max(200,(initial ?? width)+Double(value.translation.width)*(leading ? 1 : -1)))}
@@ -1085,9 +1248,13 @@ struct ConnectionPanel:View {
    HStack {
     Button(m.mode == "demo" ? "Avvia anteprima" : "Connetti Mega"){m.connect()}.buttonStyle(RobotButtonStyle(prominent:true)).disabled(!m.idle || m.firmware.busy)
     if m.state.connected {Button("Scollega controllo"){m.send("disconnect")}.disabled(!m.idle || m.firmware.busy)}
-    Button("Conferma HOME"){m.confirmHome=true}.disabled(!m.state.connected || !m.state.identified || !m.state.speed_confirmed || !m.idle || m.firmware.busy)
+    if m.state.home{RText("Riferimento HOME valido").foregroundStyle(RobotTheme.accentText)}else{Button("Imposta riferimento HOME…"){m.confirmHome=true}.disabled(!m.state.connected || !m.state.identified || !m.state.speed_confirmed || !m.idle || m.firmware.busy)}
    }
    RText("HOME è la posizione fisica iniziale scelta da te. Gli angoli sono calcolati dagli impulsi, senza encoder.").robotCaption().foregroundStyle(RobotTheme.secondary)
+   Toggle(isOn:Binding(get:{m.state.operator_collision_checks != false},set:{enabled in
+    if enabled{m.send("studio_operator_collisions",["enabled":true])}else{m.confirmOperatorWarnings=true}
+   })){RText("Blocca interferenze modello · Operatore")}.disabled(!m.idle || m.firmware.busy)
+   RText(m.state.operator_collision_checks == false ? "SOLO AVVISI: sequenze, pose e HOME non vengono bloccati dalle interferenze del modello 3D. Controlla il percorso reale. Studio MoveJ/MoveL resta verificato." : "Il modello 3D può bloccare sequenze e HOME. Disattiva solo per passare ad avvisi in questa sessione; limiti, velocità e STOP restano attivi.").robotCaption().foregroundStyle(m.state.operator_collision_checks == false ? .orange : RobotTheme.secondary)
    RText(m.state.guidance).font(.subheadline.weight(.medium)).foregroundStyle(RobotTheme.accentText).fixedSize(horizontal:false,vertical:true)
    if m.state.mode == "robot" && m.state.connected {
     RText(m.state.identified ? "Firmware riconosciuto. La USB alimenta la logica della Mega; non alimenta i motori. Per provare i movimenti servono anche le alimentazioni esterne dei driver." : "USB aperta non significa robot pronto. Con sola USB usa Anteprima: i motori non hanno alimentazione e le pose reali non sono verificabili.").robotCaption().foregroundStyle(RobotTheme.secondary).fixedSize(horizontal:false,vertical:true)
@@ -1105,21 +1272,44 @@ struct Dashboard:View {
  @AppStorage("RobotConsole.ShowSession") private var showSession=true
  @AppStorage("RobotConsole.SessionWidth") private var sessionWidth=220.0
  @AppStorage("RobotConsole.NotesWidth") private var notesWidth=220.0
+ @AppStorage("RobotConsole.StudioSceneHeight") private var studioSceneHeight=440.0
  let lime=RobotTheme.lime
  var body:some View {
   VStack(spacing:0) {
-   HStack {RText("ROBOT").bold();RText("CONSOLE").foregroundStyle(RobotTheme.accentText).bold();Spacer();Button{showSession.toggle()}label:{Label{RText("Eventi")}icon:{Image(systemName:"sidebar.left")}}.help("Mostra o nascondi attività del robot");Button{showNotes.toggle()}label:{Label{RText("Note")}icon:{Image(systemName:"sidebar.right")}}.help("Mostra o nascondi note operatore");Button("Guida"){showGuide=true};LanguagePicker();AppearancePicker();RText(m.state.mode=="demo" ? "ANTEPRIMA" : "ROBOT REALE").font(.caption.weight(.semibold)).foregroundStyle(RobotTheme.accentText).padding(.horizontal,12).padding(.vertical,7).background(lime.opacity(0.10),in:Capsule()).overlay(Capsule().stroke(lime.opacity(0.25)));Button("■ STOP"){m.send("stop")}.buttonStyle(RobotButtonStyle(danger:true)).keyboardShortcut(.escape,modifiers:[])}.padding(22).background(RobotTheme.black)
-   Rectangle().fill(lime.opacity(0.28)).frame(height:1)
-   Picker("Area di lavoro",selection:$area){RText("Operatore").tag("operator");RText("Studio 3D e programmi").tag("studio");RText("Diagnostica e ROS 2").tag("diagnostics");RText("Assistente").tag("assistant")}.pickerStyle(.segmented).padding(.horizontal,26).padding(.vertical,12).onChange(of:area,initial:true){_,a in m.keyboardEnabled=a=="operator"}
-   if !m.message.isEmpty || !m.state.error.isEmpty {
-    HStack{Image(systemName:"exclamationmark.circle");RText([m.message,m.state.error].filter{!$0.isEmpty}.joined(separator:" · ")).robotCaption().textSelection(.enabled).lineLimit(3);Spacer()}.foregroundStyle(.orange).padding(.horizontal,26).padding(.bottom,10)
+   HStack(spacing:12) {
+    ZStack {
+     RoundedRectangle(cornerRadius:7,style:.continuous).fill(RobotTheme.lime).frame(width:30,height:30)
+     Image(systemName:"cpu").font(.system(size:15,weight:.bold)).foregroundStyle(RobotTheme.ink)
+    }.accessibilityHidden(true)
+    Text("ROBOT CONSOLE").font(.system(size:14,weight:.heavy)).tracking(2.4).foregroundStyle(RobotTheme.headerText)
+    Spacer(minLength:16)
+    StatusChip(text:m.connectionStatus,color:!m.state.connected ? RobotTheme.headerSecondary : (m.connectionStatus=="Pronto" ? RobotTheme.lime : RobotTheme.amber))
+    StatusChip(text:m.state.mode=="demo" ? "ANTEPRIMA" : "ROBOT REALE",color:m.state.mode=="demo" ? RobotTheme.lime : RobotTheme.amber,filled:m.state.mode != "demo")
+    Rectangle().fill(Color.white.opacity(0.12)).frame(width:1,height:24).padding(.horizontal,2)
+    Group {
+     Button{showSession.toggle()}label:{Label{RText("Eventi")}icon:{Image(systemName:"sidebar.left")}}.help("Mostra o nascondi attività del robot")
+     Button{showNotes.toggle()}label:{Label{RText("Note")}icon:{Image(systemName:"sidebar.right")}}.help("Mostra o nascondi note operatore")
+     Button{showGuide=true}label:{Label{RText("Guida")}icon:{Image(systemName:"book")}}
+    }.buttonStyle(HeaderButtonStyle())
+    LanguagePicker();AppearancePicker()
+    Button{m.send("stop")}label:{Label{RText("STOP")}icon:{Image(systemName:"stop.fill")}}.buttonStyle(RobotButtonStyle(danger:true)).keyboardShortcut(.escape,modifiers:[]).help("Arresta subito ogni movimento (Esc)")
    }
+   .padding(.horizontal,20).padding(.vertical,12)
+   .foregroundStyle(RobotTheme.headerText).tint(RobotTheme.headerText)
+   .background(RobotTheme.header)
+   .environment(\.colorScheme,.dark)
+   Rectangle().fill(RobotTheme.lime).frame(height:2)
+   Picker("Area di lavoro",selection:$area){RText("Operatore").tag("operator");RText("Studio 3D e programmi").tag("studio");RText("Diagnostica e ROS 2").tag("diagnostics");RText("Assistente").tag("assistant")}.pickerStyle(.segmented).tint(RobotTheme.control).padding(.horizontal,20).padding(.vertical,10).frame(maxWidth:.infinity).background(RobotTheme.surface).overlay(alignment:.bottom){Rectangle().fill(RobotTheme.border).frame(height:1)}.onChange(of:area,initial:true){_,a in m.keyboardEnabled=a=="operator"}
+   if !m.message.isEmpty || !m.state.error.isEmpty {
+    HStack(spacing:9){Image(systemName:"exclamationmark.triangle.fill");RText([m.message,m.state.error].filter{!$0.isEmpty}.joined(separator:" · ")).robotCaption().textSelection(.enabled).lineLimit(3);Spacer()}.foregroundStyle(RobotTheme.warning).padding(.horizontal,12).padding(.vertical,9).background(RobotTheme.warning.opacity(0.10),in:RoundedRectangle(cornerRadius:8)).overlay(RoundedRectangle(cornerRadius:8).stroke(RobotTheme.warning.opacity(0.35))).padding(.horizontal,16).padding(.top,10)
+   }
+   APIApprovalBanner(m:m)
    HStack(spacing:0) {
    if showSession {SessionSidebar(m:m).frame(width:sessionWidth);SidebarDivider(width:$sessionWidth,leading:true)}
    GeometryReader {viewport in
    ScrollView(.vertical) {
     VStack(alignment:.leading,spacing:20) {
-     HStack {VStack(alignment:.leading,spacing:8){RText("Insegna un gesto. Ripetilo.").font(.system(size:32,weight:.bold));RText("Controllo locale · sei canali articolari · una sequenza da presentare").foregroundStyle(RobotTheme.secondary)};Spacer();VStack(alignment:.trailing){RText(m.connectionStatus).foregroundStyle(RobotTheme.accentText);RText("\(m.state.cycle) cicli completati").robotCaption()}}
+     HStack {VStack(alignment:.leading,spacing:8){RText("Insegna un gesto. Ripetilo.").font(.system(size:24,weight:.semibold));RText("Controllo locale · sei canali articolari · una sequenza da presentare").foregroundStyle(RobotTheme.secondary)};Spacer();VStack(alignment:.trailing){RText("\(m.state.cycle) cicli completati").robotCaption()}}
      if area == "operator" {
      ConnectionPanel(m:m)
      FirmwarePanel(m:m)
@@ -1129,7 +1319,9 @@ struct Dashboard:View {
      MotionPanel(m:m)
      SequencePanel(m:m)
      }else if area == "studio" {
-      Panel(title:"Braccio 3D · target virtuale") {ArmMiniView(m:m).frame(height:440)}
+      Panel(title:"Braccio 3D · target virtuale",resizable:false) {ArmMiniView(m:m,sceneHeight:$studioSceneHeight)}
+      CartesianPanel(m:m)
+      MoveJPreviewPanel(m:m)
       StudioSetupPanel(m:m)
       ProgramPanel(m:m)
       SequencePanel(m:m)
@@ -1145,10 +1337,10 @@ struct Dashboard:View {
    }.frame(minWidth:540,maxWidth:.infinity)
    if showNotes {SidebarDivider(width:$notesWidth,leading:false);OperatorNotes().frame(width:notesWidth)}
    }
-  }.background(RobotTheme.black).foregroundStyle(RobotTheme.text).tint(RobotTheme.accentText).buttonStyle(RobotButtonStyle()).frame(minWidth:1040,minHeight:720)
+  }.background(RobotTheme.canvas).foregroundStyle(RobotTheme.text).tint(RobotTheme.accentText).buttonStyle(RobotButtonStyle()).frame(minWidth:1040,minHeight:720)
   .sheet(isPresented:$showGuide){StudioGuide()}
-  .alert("Esegui il target visualizzato?",isPresented:$m.confirmStudioTarget){Button("Esegui target"){m.send("studio_execute",["confirmed":true])};Button("Annulla",role:.cancel){}}message:{RText("Il movimento viene eseguito dal controllore attuale, un giunto alla volta. Verifica il percorso, la calibrazione e i limiti. Le interferenze del modello non certificano la sicurezza fisica.")}
-  .alert("Esegui programma?",isPresented:$m.confirmStudioProgram){Button("Esegui programma"){m.send("studio_run",["confirmed":true])};Button("Annulla",role:.cancel){}}message:{RText("Avvio dalla HOME nella modalità selezionata. Le attese sensore hanno un timeout e i giunti esclusi restano bloccati. Nessuna ripresa automatica dopo un errore.")}
+  .alert("Esegui il target visualizzato?",isPresented:$m.confirmStudioTarget){Button("Esegui target"){m.send("studio_execute",["confirmed":true])};Button("Annulla",role:.cancel){}}message:{RText("Il movimento usa il MoveJ condiviso: tutti i giunti insieme, con il percorso campionato contro gli ostacoli. Con firmware senza movimenti simultanei procede un giunto alla volta. Verifica calibrazione e limiti: le interferenze del modello non certificano la sicurezza fisica.")}
+  .alert("Esegui programma?",isPresented:$m.confirmStudioProgram){Button("Esegui programma"){m.send("studio_run",["confirmed":true])};Button("Annulla",role:.cancel){}}message:{RText("Avvio dalla posizione attuale con riferimento valido nella modalità selezionata. Le attese sensore hanno un timeout e i giunti esclusi restano bloccati. Nessuna ripresa automatica dopo un errore.")}
   .alert("Carica firmware sulla Mega?",isPresented:$m.confirmUpload){
    Button("Carica firmware"){m.firmwareAction("upload")}
    Button("Annulla",role:.cancel){}
@@ -1159,7 +1351,15 @@ struct Dashboard:View {
   }message:{RText("Scarica tramite Arduino CLI il core Arduino AVR 1.8.8 e AccelStepper 1.64. Serve Internet. Non carica nulla sulla scheda.")}
   .alert("Connessione al robot reale",isPresented:$m.confirmConnect){Button("Connetti Mega"){m.connectNow()};Button("Annulla",role:.cancel){}}message:{RText("Questa azione apre la porta seriale selezionata. Procedi solo quando hai predisposto i collegamenti e vuoi controllare il robot reale.")}
   .alert("Conferma HOME",isPresented:$m.confirmHome){Button("Conferma"){m.send("home_set")};Button("Annulla",role:.cancel){}}message:{RText(m.state.mode == "demo" ? "Confermi lo zero virtuale? L’anteprima non apre la seriale e non controlla il robot." : "Il braccio è fisicamente nella posa iniziale? La conferma azzera gli angoli e abilita la tenuta dei motori. Sostieni il braccio durante la prima abilitazione.")}
-  .alert("Riproduci la sequenza",isPresented:$m.confirmPlay){Button("Esegui"){m.send("play",["repeat":m.repeatPlay])};Button("Annulla",role:.cancel){}}message:{RText("Verifica che il percorso sia libero e le condizioni uguali alla prova.")}
+  .alert("Interferenze modello solo come avvisi?",isPresented:$m.confirmOperatorWarnings){Button("Usa solo avvisi"){m.send("studio_operator_collisions",["enabled":false,"confirmed":true])};Button("Annulla",role:.cancel){}}message:{RText("Per sequenze, pose e HOME dell’Operatore il controllo collisioni del modello 3D non bloccherà i movimenti. Verifica visivamente il percorso reale. Limiti, velocità, comunicazione e STOP restano attivi. MoveJ/MoveL nello Studio mantengono i controlli. La scelta si azzera alla prossima connessione.")}
+  .alert("Ritorno diretto a HOME",isPresented:$m.confirmReturnHome){Button("Esegui ritorno"){m.send("home",["context":m.homeContext])};Button("Annulla",role:.cancel){}}message:{RText("Il ritorno collega la posizione attuale a zero con i giunti simultanei. Non ripercorre le vecchie pose o i jog. Controlla la traccia 3D e il percorso reale prima di confermare.")}
+  .alert("Riproduci la sequenza",isPresented:$m.confirmPlay){Button("Esegui"){m.send("play",["repeat":m.repeatPlay,"return_home":m.sequenceReturnHome,"context":m.sequenceContext])};Button("Annulla",role:.cancel){}}message:{
+   if let motion=m.state.sequence_motion,motion.ordered{
+    Text(motion.jointOrder+"\n"+T("Da una posa all’altra si muove un giunto alla volta, con le pause impostate."))
+   }else{
+    RText("Partenza dalla posizione attuale. Le pose attive vengono raggiunte nell’ordine visibile, con giunti simultanei.")
+   }
+  }
   .alert("Svuota sequenza",isPresented:$m.confirmClear){Button("Svuota",role:.destructive){m.send("clear")};Button("Annulla",role:.cancel){}}message:{RText("Le pose salvate saranno cancellate.")}
   .alert("Chiudi Robot Console",isPresented:$m.confirmQuit){
    if m.idle && m.state.home {Button("Torna a HOME"){m.returnAndQuit()}}

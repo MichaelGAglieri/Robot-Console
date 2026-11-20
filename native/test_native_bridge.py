@@ -29,7 +29,10 @@ class BridgeTests(unittest.TestCase):
      s=call('heartbeat')
      if not s['busy']:break
      time.sleep(.04)
-    self.assertEqual(s['cycle'],1);self.assertEqual(s['pos'],[0]*6)
+    self.assertEqual(s['cycle'],1);self.assertEqual(s['pos'],[.25,0,0,0,0,0]);self.assertTrue(s['home'])
+    call('home')
+    while call('heartbeat')['busy']:time.sleep(.04)
+    self.assertEqual(call('heartbeat')['pos'],[0]*6)
     self.assertTrue((Path(folder)/'sequenza.json').exists())
     p.stdin.close();self.assertEqual(p.wait(timeout=3),0)
    finally:
