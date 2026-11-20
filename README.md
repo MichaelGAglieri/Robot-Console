@@ -33,6 +33,18 @@ Collision checks use the same capsules with either model. See [models/doc5/NOTIC
 
 ## Install and run
 
+### Packages (no Python needed)
+
+From [Releases](https://github.com/MichaelGAglieri/Robot-Console/releases):
+
+- **Linux (Ubuntu 22.04+ / Debian 12+, x86-64):** `robot-console_<version>_amd64.deb` → `sudo apt install ./robot-console_*.deb`. It also installs the menu entry and the udev rule for the Mega serial port; then log out and in once.
+- **Windows 10/11 (x64):** `Robot-Console-<version>-Windows-x64-setup.exe` (or the portable `.zip`). The installer is not code-signed, so SmartScreen may ask *More info → Run anyway*.
+- **macOS (Apple Silicon):** `Robot-Console-<version>-macOS-arm64.dmg` → drag the app to Applications. It is ad-hoc signed, not signed with a paid Apple Developer ID: on first start right click → **Open**, or System Settings → Privacy & Security → **Open Anyway**.
+
+Packages are built by GitHub Actions with `python scripts/build_desktop.py` (PyInstaller); you can run the same script locally.
+
+### From source
+
 Requirements: **Python 3.10+** (3.12 recommended). For firmware compilation/upload install [Arduino CLI](https://arduino.github.io/arduino-cli/) or Arduino IDE; Ollama is optional.
 
 ```sh

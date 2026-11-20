@@ -9,6 +9,7 @@
 - Voce: sintesi Qt; dettatura offline facoltativa con Vosk, altrimenti comando scritto con la stessa conferma.
 - Avvio con `run.sh` / `run.bat`, opzioni `--no-hardware` e `--data`; regola udev e lanciatore per Linux.
 - CI su Ubuntu, Windows e macOS; test end-to-end della finestra Qt in anteprima.
+- Pacchetti senza Python da installare: `.deb` per Linux, installer `.exe` e `.zip` per Windows, `.dmg` per macOS con firma ad-hoc (`scripts/build_desktop.py`, workflow «Desktop packages»).
 - Rimossi percorsi personali dalla documentazione e il vecchio modello illustrativo UR3e.
 
 ## 2.0.1 · build47 — ordine dei giunti nelle sequenze

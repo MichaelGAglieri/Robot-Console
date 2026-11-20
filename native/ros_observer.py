@@ -3,7 +3,8 @@
 """Read-only observer plus namespaced visualization. Never publishes commands."""
 import json, math, sys, time
 from pathlib import Path
-sys.path.insert(0,str(Path(__file__).resolve().parent.parent))
+# Source checkout: modules one level up; packaged app: next to this file.
+for _path in (Path(__file__).resolve().parent,Path(__file__).resolve().parent.parent):sys.path.insert(0,str(_path))
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile,DurabilityPolicy

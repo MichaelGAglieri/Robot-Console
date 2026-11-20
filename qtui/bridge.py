@@ -36,8 +36,11 @@ class Bridge(QObject):
         self.process.errorOccurred.connect(self._error)
 
     def start(self):
-        script = ROOT / 'native' / 'native_bridge.py'
-        self.process.start(sys.executable, ['-u', str(script)])
+        if getattr(sys, 'frozen', False):
+            # Packaged app: the bundled executable runs the controller itself.
+            self.process.start(sys.executable, ['--controller'])
+        else:
+            self.process.start(sys.executable, ['-u', str(ROOT / 'native' / 'native_bridge.py')])
         if not self.process.waitForStarted(8000):
             self.failed.emit('Impossibile avviare il controllo: ' + self.process.errorString())
             return False
