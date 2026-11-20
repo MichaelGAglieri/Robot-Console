@@ -9,7 +9,7 @@ class PortGuard(unittest.TestCase):
   result=SimpleNamespace(returncode=0,stdout='p12345\ncserial-monitor\nf3\n',stderr='')
   with patch.object(threading.Thread,'start'):c=server.Controller()
   with patch.object(serial_transport.os.path,'exists',return_value=True),patch.object(serial_transport.subprocess,'run',return_value=result),patch.object(server.os,'open') as opened:
-   with patch.object(server.glob,'glob',return_value=['/dev/cu.usbmodemTEST']):
+   with patch.object(serial_transport,'candidate_ports',return_value=['/dev/cu.usbmodemTEST']):
     with self.assertRaisesRegex(ValueError,'occupata'):c.action(dict(op='connect',mode='robot',port='/dev/cu.usbmodemTEST'))
    opened.assert_not_called();self.assertFalse(c.connected)
  def test_free_port_and_own_process_allowed(self):

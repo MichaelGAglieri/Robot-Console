@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (c) 2026 Michael Giuseppe Aglieri
-"""Local-only DOC presentation controller. No third-party Python dependencies."""
-import hashlib, uuid, json, math, os, select, termios, threading, time, glob, secrets, fcntl, struct
+"""Robot controller shared by every Robot Console front end (serial protocol, poses, sequences).
+The old browser mode, whose page was no longer shipped, has been removed."""
+import hashlib, uuid, json, math, os, threading, time, secrets
 from pathlib import Path
-from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 ROOT=Path(__file__).resolve().parent
 DATA=Path(os.environ.get("DOC_REGIA_DATA", str(ROOT)))
 DATA.mkdir(parents=True,exist_ok=True)
 from voice_commands import parse_command, confirmation
-from serial_transport import ensure_port_available, claim_exclusive
+import serial_transport
+from serial_transport import ensure_port_available
 USB_BOOT_QUIET=3.0
 HELLO_RETRY=4.0
 AXES=6
-TOKEN=secrets.token_urlsafe(24)
 def path_units(path):
  """Legacy edges stay sequential; explicit contiguous groups are atomic."""
  units=[];seen=set()
@@ -143,7 +143,7 @@ class Controller:
    try:self.journal.add('event',self.mode,s)
    except Exception:pass # Storage errors must never prevent STOP.
  def write(self,s):
-  if self.fd is not None: os.write(self.fd,s.encode())
+  if self.fd is not None: serial_transport.write(self.fd,s.encode())
  def halt(self,reason,send=True):
   with self.lock:
    try:
@@ -240,14 +240,13 @@ class Controller:
      if any(now-deadline>3 for deadline in self.pending_off.values()):
       for axis in self.pending_off:self.drive_state[axis]=None
       self.pending_off.clear();self.halt('Disabilitazione non confermata: corrente del driver non verificata.');continue
-     if select.select([self.fd],[],[],0)[0]:
-      data=os.read(self.fd,4096)
-      if not data:raise OSError('USB scollegata')
+     data=serial_transport.read(self.fd)
+     if data:
       self.rx+=data
       while b'\n' in self.rx:
        line,self.rx=self.rx.split(b'\n',1);self.receive(line.decode(errors='replace').strip())
     except OSError as e:
-     self.halt(str(e));self.connected=False;os.close(self.fd);self.fd=None
+     self.halt(str(e));self.connected=False;serial_transport.close(self.fd);self.fd=None
  def guide(self):
   if not self.connected:return '1 · Avvia Anteprima senza hardware oppure scegli Robot USB e connetti la porta.'
   if not self.identified and self.connected and time.monotonic()<self.boot_ready_at:return '1 · Avvio Mega: attendo 3 secondi senza trasmettere sulla USB.'
@@ -267,7 +266,7 @@ class Controller:
       progress=motion_fraction(1,m['path_speed'],time.time()-m['started'],m['path_acceleration'])
       preview[i]=m['starts'][i]+(m['targets'][i]-m['starts'][i])*progress
     else:preview[m['axis']]=m['start']+(m['target']-m['start'])*f
-   return dict(sequence_motion=self.sequence_motion,operator_collision_checks=self.operator_collision_checks,robot_events=self.robot_events[:],multi_axis=self.mode=='demo' or self.multi_axis,active_axes=self.motion.get('axes',[self.motion.get('axis')]) if self.motion else [],axis_speeds=[min(v,self.max_speed) for v in self.axis_speeds],axis_control=self.mode=='demo' or self.axis_control,drive_caps=[True]*AXES if self.mode=='demo' else self.drive_caps,drive_state=self.drive_state,pending_off=list(self.pending_off),active_axis=self.motion.get('axis') if self.motion else self.preparing_axis,axes_available=[self.mode=='demo' or i<min(self.reported_axes,self.configured_axes) for i in range(AXES)],hardware_ok=self.hardware_ok(),firmware_profile=self.firmware_profile,mode=self.mode,connected=self.connected,home=self.home,pos=self.pos[:],preview_pos=preview,motion=self.motion,axes_enabled=self.axes_enabled[:],limits=self.limits,trail=len(self.trail),sequence=self.sequence,sequence_revision=self.sequence_revision,can_undo=self.sequence_undo is not None,max_speed=self.max_speed,events=self.events,busy=self.busy,playing=self.playing,paused=self.paused,error=self.error,grip=self.grip,identified=self.identified,firmware=self.firmware,speed=self.speed,speed_confirmed=self.speed_confirmed,guidance=self.guide(),cycle=self.cycle,ports=glob.glob('/dev/cu.usbmodem*')+glob.glob('/dev/cu.usbserial*'))
+   return dict(sequence_motion=self.sequence_motion,operator_collision_checks=self.operator_collision_checks,robot_events=self.robot_events[:],multi_axis=self.mode=='demo' or self.multi_axis,active_axes=self.motion.get('axes',[self.motion.get('axis')]) if self.motion else [],axis_speeds=[min(v,self.max_speed) for v in self.axis_speeds],axis_control=self.mode=='demo' or self.axis_control,drive_caps=[True]*AXES if self.mode=='demo' else self.drive_caps,drive_state=self.drive_state,pending_off=list(self.pending_off),active_axis=self.motion.get('axis') if self.motion else self.preparing_axis,axes_available=[self.mode=='demo' or i<min(self.reported_axes,self.configured_axes) for i in range(AXES)],hardware_ok=self.hardware_ok(),firmware_profile=self.firmware_profile,mode=self.mode,connected=self.connected,home=self.home,pos=self.pos[:],preview_pos=preview,motion=self.motion,axes_enabled=self.axes_enabled[:],limits=self.limits,trail=len(self.trail),sequence=self.sequence,sequence_revision=self.sequence_revision,can_undo=self.sequence_undo is not None,max_speed=self.max_speed,events=self.events,busy=self.busy,playing=self.playing,paused=self.paused,error=self.error,grip=self.grip,identified=self.identified,firmware=self.firmware,speed=self.speed,speed_confirmed=self.speed_confirmed,guidance=self.guide(),cycle=self.cycle,ports=serial_transport.candidate_ports())
  def hardware_ok(self):
   if self.profile_error:return False
   expected=getattr(self,'expected_profile','')
@@ -601,34 +600,22 @@ class Controller:
     if self.busy or self.playing:raise ValueError('Ferma prima il movimento.')
     self.operator_collision_checks=True
     if self.connected:self.halt('Controllo scollegato: HOME da ristabilire.')
-    if self.fd is not None:os.close(self.fd);self.fd=None
+    if self.fd is not None:serial_transport.close(self.fd);self.fd=None
     self.connected=False;self.home=False;self.identified=False;self.speed_confirmed=False
     return
    if op=='connect':
     if b.get('mode')=='robot' and os.environ.get('DOC_REGIA_NO_HARDWARE')=='1':raise ValueError('Questa anteprima isolata non può aprire la USB del robot.')
     if self.busy or self.playing:raise ValueError('Ferma prima il movimento')
     self.operator_collision_checks=True
-    if self.fd is not None:os.close(self.fd);self.fd=None
+    if self.fd is not None:serial_transport.close(self.fd);self.fd=None
     self.multi_axis=False;self.axis_control=False;self.drive_caps=[False]*AXES;self.drive_state=[None]*AXES;self.pending_off.clear();self.preparing_axis=None
     self.connected=False;self.home=False;self.trail=[];self.pos=[0.0]*AXES;self.error='';self.limits=[[0.0,0.0] for _ in range(AXES)];self.grip='non comandata'
     self.max_speed=min(20.0 if b.get('mode','demo')=='demo' else 10.0,self.profile_speed_limit);self.awaiting_halt=False;self.serial_lines=0;self.last_serial='';self.mode=b.get('mode','demo');self.reported_axes=5;self.identified=False;self.rx=b'';self.firmware='';self.speed=min(5.0,self.max_speed);self.requested_speed=self.speed;self.firmware_profile='';self.speed_confirmed=False;self.connected_at=time.monotonic();self.boot_ready_at=self.connected_at+USB_BOOT_QUIET;self.last_hello=self.connected_at-HELLO_RETRY
     if self.mode=='robot':
      port=b['port']
-     if port not in glob.glob('/dev/cu.usbmodem*')+glob.glob('/dev/cu.usbserial*'):raise ValueError('Porta USB non valida')
+     if port not in serial_transport.candidate_ports():raise ValueError('Porta USB non valida')
      ensure_port_available(port)
-     self.fd=os.open(port,os.O_RDWR|os.O_NOCTTY|os.O_NONBLOCK)
-     try:
-      claim_exclusive(self.fd)
-      ensure_port_available(port)
-     except Exception:
-      os.close(self.fd);self.fd=None;raise
-     attr=termios.tcgetattr(self.fd);attr[0]=0;attr[1]=0;attr[2]=termios.CS8|termios.CREAD|termios.CLOCAL;attr[3]=0;attr[4]=attr[5]=termios.B115200;attr[6][termios.VMIN]=0;attr[6][termios.VTIME]=0
-     try:
-      termios.tcsetattr(self.fd,termios.TCSANOW,attr)
-      # Restore modem-control lines after avrdude; no ARM or motion command.
-      fcntl.ioctl(self.fd,termios.TIOCMBIS,struct.pack('I',termios.TIOCM_DTR|termios.TIOCM_RTS))
-     except OSError:
-      os.close(self.fd);self.fd=None;raise
+     self.fd=serial_transport.open_port(port)
      self.log('USB configurata: 115200 baud · 8N1 · DTR/RTS attivi; attendo identificazione.')
      self.connected=True
      # handshake is asynchronous; home is refused until the version is recognized
@@ -785,21 +772,3 @@ class Controller:
   tmp.write_text(json.dumps(saved,ensure_ascii=False,indent=2));tmp.replace(path)
   self.sequence_revision+=1
 c=Controller()
-class Handler(BaseHTTPRequestHandler):
- def log_message(self,*args):pass
- def send(self,code,data,kind='application/json'):
-  raw=data if isinstance(data,bytes) else json.dumps(data).encode();self.send_response(code);self.send_header('Content-Type',kind);self.send_header('Cache-Control','no-store');self.end_headers();self.wfile.write(raw)
- def do_GET(self):
-  if self.path=='/api/state':self.send(200,c.state())
-  elif self.path=='/':self.send(200,(ROOT/'index.html').read_bytes().replace(b'__TOKEN__',TOKEN.encode()),'text/html; charset=utf-8')
-  else:self.send(404,{'error':'Not found'})
- def do_POST(self):
-  if self.headers.get('X-Token')!=TOKEN:self.send(403,{'error':'Sessione non valida'});return
-  try:
-   n=int(self.headers.get('Content-Length',0))
-   if n>20000:raise ValueError('Richiesta troppo grande')
-   c.action(json.loads(self.rfile.read(n)));self.send(200,{'ok':True})
-  except Exception as e:self.send(400,{'error':str(e)})
-if __name__=='__main__':
- print('DOC Regia: http://127.0.0.1:8768',flush=True)
- ThreadingHTTPServer(('127.0.0.1',8768),Handler).serve_forever()

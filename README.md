@@ -2,39 +2,68 @@
 
 > **Work in progress.** This project is under active development. Hardware, software, interfaces and configuration can change. See the [roadmap](ROADMAP.md).
 
-A native macOS application for teaching, previewing and replaying arm poses on up to six joint channels. The physical D.O.C. reference robot has five DOF. It was developed during my D.O.C. robotics project and currently ships with that project's hardware configuration.
+A desktop application for **macOS, Linux and Windows** to teach, preview and replay arm poses on up to six joint channels. The physical D.O.C. reference robot has five DOF (Arduino Mega 2560 + RAMPS 1.4). It was developed during my D.O.C. robotics project and ships with that project's hardware configuration.
+
+Since 2.1.0 the app is a native **Qt (PySide6)** window on every platform. The original SwiftUI app for macOS stays in `native/` and uses the same controller.
 
 ## Features
 
 - Preview mode without hardware and explicit USB connection to the robot.
-- Italian / English selection and light, dark or automatic macOS appearance, with saved preferences.
+- Italian / English and light, dark or system appearance, with saved preferences.
 - Operator-defined HOME, editable joint limits and independent 1–20°/s joint speeds within the hardware profile limit.
-- Explicit simultaneous joint groups, shared manual/group speed controls and estimated speed/duration previews.
+- Simultaneous joint groups, shared manual/group speed controls and estimated speed/duration previews.
 - Per-joint STOP with holding torque, confirmed ENABLE control on wired drivers, and an autosaved operator notes sidebar.
-- Pose recording, editing, reordering, deletion, temporary exclusion and one-step undo.
-- Per-pose gripper state, pauses, repeat cycles and return along recorded paths.
-- Bundled DOC 5 DOF presentation/Webots visualization, orbit/zoom/fit controls, local URDF import, joint exclusion, mapping, sign/offset calibration and TCP.
-- Position-only preview IK, approximate workcell boxes, bounded program blocks and CSV recordings.
-- Per-axis motor steps, microstepping, reducer ratio and direction; editable firmware sources, revisions, compilation and confirmed upload.
-- RViz visualization topics, ROS health, optional tool launchers, camera/QR and authenticated loopback sensor API.
-- Italian/English on-device voice commands with spoken readback and explicit one-use confirmation.
-- Optional local Ollama chat, conversation journal, on-device dictation and a read-only ROS 2 observer.
+- Pose recording, editing, reordering, deletion, temporary exclusion and one-step undo; simultaneous or ordered joint motion between poses.
+- 3D view of the DOC arm (Qt Quick 3D): orbit, pan, zoom, preset views, planned path, TCP trail, work frames and targets.
+- Cartesian jog and IK preview, MoveJ / MoveL planning, offline programs with loops, conditions, variables and functions; one plan for preview, validation and execution.
+- Collision checks against the arm itself, obstacles and the table, with fixed capsules fitted to the EB-15 geometry.
+- Per-axis motor steps, microstepping, reducer ratio and direction; editable firmware sources, revisions, compilation and confirmed upload through Arduino CLI.
+- ROS 2 visualization topics, ROS health, optional tool launchers, local camera/QR and an authenticated loopback Python API.
+- Voice motion commands with spoken readback and explicit one-use confirmation (typed, or dictated offline with Vosk).
+- Optional local Ollama chat, conversation journal and a read-only ROS 2 observer.
 
-**Supported in this release:** macOS 14 or later on Apple Silicon, Python 3, Mega 2560 and the documented RAMPS/A4988/DM542 configuration. The firmware backend remains Mega/RAMPS: J1/X A4988, J2/Y external DM542, J3/Z, J4/E0, J5/E1; The bundled visualization retains five arm DOF; J6 can be tested in preview, excluded, or configured for a separate external STEP/DIR driver. Other boards and Windows are not supported yet. See [Studio guide](docs/STUDIO.md) for exact limits.
+## The DOC model
 
-## Install or build
+The joints, link lengths and the position of every part come from the assembly of the ToolBox Robotics **EB-15** arm and **EBG-30** gripper done for D.O.C. The ToolBox parts are licensed CC BY-NC-ND 4.0, so this repository does **not** contain them or meshes derived from them:
 
-Download the macOS application from [Releases](https://github.com/MichaelGAglieri/Robot-Console/releases), unzip it and copy `Robot Console.app` into Applications. Python 3 must be installed. For firmware compilation/upload, install [Arduino CLI](https://arduino.github.io/arduino-cli/) or Arduino IDE; the app finds either installation. Ollama is optional and is installed separately.
+- out of the box you see a **schematic** DOC model (capsules, discs and boxes, GPL);
+- to see the **detailed** model, download [EB-15](https://www.thingiverse.com/thing:6488872) and [EBG-30](https://www.thingiverse.com/thing:6460300) from Thingiverse and choose **Studio → Importa pezzi EB-15…** (or run `python eb15_model.py EB-15.zip EBG-30.zip`). The app recognises the original files by SHA-256 and builds the meshes in your own data folder, for personal non-commercial use.
 
-The current build is ad-hoc signed, not notarized or signed with an Apple Developer ID. Follow normal macOS security checks and review the source; this repository does not provide commands to disable Gatekeeper.
+Collision checks use the same capsules with either model. See [models/doc5/NOTICE.md](models/doc5/NOTICE.md).
 
-To build the app locally, install Apple's Command Line Tools and run:
+## Install and run
+
+Requirements: **Python 3.10+** (3.12 recommended). For firmware compilation/upload install [Arduino CLI](https://arduino.github.io/arduino-cli/) or Arduino IDE; Ollama is optional.
 
 ```sh
-zsh native/build.command
+git clone https://github.com/MichaelGAglieri/Robot-Console.git
+cd Robot-Console
+./run.sh                # macOS and Linux: creates .venv on first start
 ```
 
-This creates `Robot Console.app` in this directory without opening USB, starting Ollama or uploading firmware. For local updates, quit Robot Console and run `zsh native/install_local.command`: the installer verifies the app, saves the immediately previous build and a separate data recovery archive, installs in Applications and moves older managed app backups to Trash. It retains the current and immediately previous app generations; it does not open the app or connect hardware. Read [docs/STUDIO.md](docs/STUDIO.md) and [docs/USAGE.md](docs/USAGE.md) before connecting a robot. Current version: **2.0.1**; included firmware protocol: **Regia 4**.
+On Windows double-click **`run.bat`** (or run it from a terminal). Manual setup on any system:
+
+```sh
+python -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt      # Windows: .venv\Scripts\python -m pip …
+.venv/bin/python robot_console.py
+```
+
+Useful options: `--no-hardware` (preview only, the USB port is never opened) and `--data FOLDER` (separate data folder). Optional extras in `requirements-optional.txt`: OpenCV for QR codes, Vosk + sounddevice for offline dictation.
+
+### Platform notes
+
+| | Serial port | Data folder |
+| --- | --- | --- |
+| macOS | `/dev/cu.usbmodem*`, `cu.usbserial*`, `cu.wchusbserial*` | `~/Library/Application Support/DOC Regia` |
+| Linux | `/dev/ttyACM*`, `/dev/ttyUSB*` | `$XDG_DATA_HOME/doc-regia` (default `~/.local/share/doc-regia`) |
+| Windows | `COM*` (through pyserial) | `%APPDATA%\DOC Regia` |
+
+- **Linux:** your user needs access to the serial port: `sudo usermod -aG dialout $USER` and log in again, or install [packaging/linux/99-robot-console.rules](packaging/linux/99-robot-console.rules). A desktop launcher template is in `packaging/linux/`. Qt needs the usual system libraries (`libegl1`, `libxkbcommon0`, `libfontconfig1`). Text-to-speech uses speech-dispatcher when installed.
+- **Windows:** install the Arduino Mega driver if the board does not appear as a COM port; close the Arduino IDE serial monitor before connecting. The J.A.R.V.I.S. local socket channel is not available on Windows.
+- **macOS:** the SwiftUI app can still be built with `zsh native/build.command` (Command Line Tools required); it is ad-hoc signed, not notarized.
+
+Only one controller runs per data folder: close the macOS SwiftUI app before opening the Qt app on the same data, or use `--data`.
 
 ## First use
 
@@ -43,17 +72,17 @@ This creates `Robot Console.app` in this directory without opening USB, starting
 3. Return to virtual HOME and replay. Only enabled poses perform their pause and gripper action.
 4. For physical use follow the [hardware guide](docs/HARDWARE.md), establish HOME and apply limits before moving. USB connection and a firmware acknowledgement do not measure the real arm's position.
 
-Explicit simultaneous groups are available from 2.0.1 with updated MULTI_AXIS_V1 firmware; existing taught paths and Studio targets retain their original sequencing. See [simultaneous motion and voice](docs/MULTI_VOICE.md). Clearing a joint checkbox can release winding current on wired A4988 drivers after confirmation; support a loaded axis before releasing it. J2/DM542 ENA is unwired in the reference configuration, so software exclusion cannot remove its holding torque. Per-joint ENABLE control requires the updated bundled firmware; updating the app never uploads it automatically.
+**Esc** stops every motion; **Alt/Option + ←/→** jogs the selected joint in the Operator workspace. Clearing a joint checkbox can release winding current on wired A4988 drivers after confirmation; support a loaded axis before releasing it. J2/DM542 ENA is unwired in the reference configuration. Per-joint ENABLE control and simultaneous groups need the bundled firmware; the app never uploads it automatically.
 
-Pose editing saves data without moving the robot. New joint values extend the original recorded path in J1–J6 order; they are not collision-checked. Excluded poses can still be crossed by the recorded paths of later enabled poses.
+**Supported hardware:** Mega 2560 and the documented RAMPS/A4988/DM542 configuration: J1/X A4988, J2/Y external DM542, J3/Z, J4/E0, J5/E1; J6 can be tested in preview, excluded, or configured for a separate external STEP/DIR driver. See the [Studio guide](docs/STUDIO.md) for exact limits.
 
 ## Tests
 
 ```sh
-python3 scripts/run_tests.py
+python scripts/run_tests.py
 ```
 
-Tests isolate user data and use preview, mocks or pseudo-terminals. They do not require a connected Mega and do not establish mechanical performance. Optional integration checks: `python3 -m unittest test_local_api` (loopback socket), `python3 scripts/verify_firmware_workspace.py` (installed Arduino dependencies, compilation only), and `python scripts/verify_ros_observer.py` (prepared ROS environment). The macOS build workflow also compiles the Swift application.
+Tests isolate user data and use preview, mocks or pseudo-terminals (pseudo-terminal tests are skipped on Windows). With PySide6 installed they also drive the Qt window offscreen against the real controller in preview mode. They do not require a connected Mega and do not establish mechanical performance. CI runs them on Ubuntu, Windows and macOS. Optional integration checks: `python scripts/verify_firmware_workspace.py` (Arduino dependencies, compilation only) and `python scripts/verify_ros_observer.py` (prepared ROS environment).
 
 ## D.O.C. and ROS 2
 
@@ -61,4 +90,4 @@ The simulation and ROS 2 package are maintained in [DOC-Robotics](https://github
 
 ## Credits and license
 
-Project by **Michael Giuseppe Aglieri**, with AI-assisted development and bench-driven iteration. Code is GPL-3.0-only; the bundled firmware uses Mike McCauley's AccelStepper. The app illustration was generated with AI and supplied by the project author. See [AUTHORS.md](AUTHORS.md), [THIRD_PARTY.md](THIRD_PARTY.md) and [LICENSE](LICENSE).
+Project by **Michael Giuseppe Aglieri**, with AI-assisted development and bench-driven iteration. Code is GPL-3.0-only; the bundled firmware uses Mike McCauley's AccelStepper; the mechanical reference is the ToolBox Robotics EB-15 / EBG-30 design. See [AUTHORS.md](AUTHORS.md), [THIRD_PARTY.md](THIRD_PARTY.md) and [LICENSE](LICENSE).

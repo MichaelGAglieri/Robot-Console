@@ -43,8 +43,13 @@ class Studio:
   if builtin and self.raw.encode() in (default_urdf(5),default_urdf(6)) and (Path(__file__).parent/'models/doc5/doc5.urdf').is_file():self.load_reference()
   bundled=Path(__file__).parent/'models/doc5/doc5.urdf'
   if builtin and self.model.get('reference')=='doc5-presentation' and bundled.is_file() and self.raw.encode()!=bundled.read_bytes():self.upgrade_reference()
+  elif builtin and self.model.get('reference')=='doc5-presentation':
+   import eb15_model
+   try:eb15_model.adopt(self.model,self.folder)
+   except (OSError,ValueError):pass
+   if self.model.get('mesh_variant')!=self.reference_variant()[0]:self.switch_reference_meshes()
  def upgrade_reference(self):
-  # The bundled DOC model changed (UR3e adaptation -> EB-15 parts): keep mapping, signs and scene; offsets follow the new nominal HOME.
+  # The bundled DOC model changed (older illustrative model -> EB-15 assembly): keep mapping, signs and scene; offsets follow the new nominal HOME.
   backup=None
   if (self.folder/'project.json').exists():backup=self.folder/('project-prima-modello-'+time.strftime('%Y%m%d-%H%M%S')+'.json');shutil.copy2(self.folder/'project.json',backup)
   mapping,enabled,signs=dict(self.mapping),dict(self.enabled),{k:v['sign'] for k,v in self.calibration.items()}
@@ -54,11 +59,42 @@ class Studio:
    if name in mapping:self.mapping[name]=mapping[name];self.enabled[name]=enabled.get(name,True);self.calibration[name]['sign']=signs.get(name,1)
   self.project_name,self.obstacles,self.blocks,self.sensors,self.outputs=kept;self.save()
   self.status='Modello DOC aggiornato ai pezzi EB-15; offset riportati alla HOME nominale.'+(' Copia del progetto precedente: '+backup.name if backup else '')
+ def attach_reference_collision(self,model,raw):
+  """The bundled DOC URDF carries a measured collision envelope (models/doc5/collision.json)."""
+  folder=Path(__file__).parent/'models/doc5'
+  try:
+   if raw!=(folder/'doc5.urdf').read_bytes():return
+   links=json.loads((folder/'collision.json').read_text())['links']
+   known={link['name'] for link in model['links']}
+   capsules={name:[dict(a=[number(v,-2,2) for v in c['a']],b=[number(v,-2,2) for v in c['b']],r=number(c['r'],.001,.5)) for c in items] for name,items in links.items() if name in known and len(items)<=8}
+  except (OSError,ValueError,KeyError,TypeError):return
+  model['collision_capsules']=capsules
+ def reference_variant(self):
+  """Detailed EB-15 meshes generated on this computer, else the bundled schematic ones."""
+  import eb15_model
+  folder=eb15_model.installed(self.folder)
+  return ('eb15',folder) if folder else ('schematic',Path(__file__).parent/'models/doc5')
  def load_reference(self):
-  source=Path(__file__).parent/'models/doc5/doc5.urdf';raw=source.read_bytes();directory=self.folder/'models'/('doc5-'+hashlib.sha256(raw).hexdigest()[:16]);directory.mkdir(parents=True,exist_ok=True)
-  self.model=parse_urdf(raw,source.parent,directory);self.model.update(approximate=True,schematic=False);self.raw=raw.decode();self.reset_joints(True);self.tip=self.model['tip'];self.tool=[0,0,0];self.follow=True;self.verified=False
+  source=Path(__file__).parent/'models/doc5/doc5.urdf';raw=source.read_bytes();variant,base=self.reference_variant()
+  directory=self.folder/'models'/('doc5-'+hashlib.sha256(raw+variant.encode()).hexdigest()[:16]);directory.mkdir(parents=True,exist_ok=True)
+  self.model=parse_urdf(raw,base,directory);self.model.update(approximate=True,schematic=False,mesh_variant=variant);self.attach_reference_collision(self.model,raw);self.raw=raw.decode();self.reset_joints(True);self.tip=self.model['tip'];self.tool=[0,0,0];self.follow=True;self.verified=False
   for joint,offset in zip(self.independent(),self.model.get('nominal_home',[])):self.calibration[joint['name']]['offset']=offset
-  self.status='Modello di visualizzazione Webots/presentazione, non CAD calibrato del DOC fisico.'
+  self.status=('Modello DOC con i pezzi EB-15 generati su questo computer; ' if variant=='eb15' else 'Modello DOC schematico; ')+'non CAD calibrato del DOC fisico.'
+ def switch_reference_meshes(self):
+  """Same URDF and joint frames with other display meshes: keep mapping, calibration and scene."""
+  keep=(copy.deepcopy(self.mapping),copy.deepcopy(self.enabled),copy.deepcopy(self.calibration),self.tool[:],self.tip,self.verified,self.project_name,self.obstacles,self.blocks,self.sensors,self.outputs)
+  self.load_reference()
+  mapping,enabled,calibration,self.tool,self.tip,self.verified,self.project_name,self.obstacles,self.blocks,self.sensors,self.outputs=keep
+  for name in self.mapping:
+   if name in mapping:self.mapping[name]=mapping[name];self.enabled[name]=enabled.get(name,True);self.calibration[name]=calibration.get(name,self.calibration[name])
+  self._geometry=None;self.save()
+ def import_eb15(self,paths):
+  import eb15_model
+  self.idle_configuration()
+  if not isinstance(paths,list) or not paths or not all(isinstance(p,str) for p in paths):raise ValueError('Scegli i pacchetti EB-15 ed EBG-30 scaricati da Thingiverse.')
+  report=eb15_model.install(paths,self.folder)
+  if self.model.get('reference')=='doc5-presentation':self.switch_reference_meshes()
+  self.status='Modello EB-15 generato localmente: %d mesh.'%report['meshes']
  def independent(self):return [j for j in self.model['joints'] if j['kind']!='fixed' and not j['mimic']]
  def effective_enabled(self):return {name:(self.controller.axes_enabled[self.mapping[name]] if self.mapping[name]>=0 else enabled) for name,enabled in self.enabled.items()}
  def reset_joints(self,default=False):
@@ -91,6 +127,8 @@ class Studio:
   checked=parse_urdf(data['urdf'].encode());old=data.get('model',{})
   checked['approximate']=bool(old.get('approximate',False))
   checked['schematic']=bool(old.get('schematic',False))
+  if old.get('mesh_variant') in ('eb15','schematic'):checked['mesh_variant']=old['mesh_variant']
+  self.attach_reference_collision(checked,data['urdf'].encode())
   old_visuals={link['name']:link.get('visuals',[]) for link in old.get('links',[])}
   for link in checked['links']:
    for index,visual in enumerate(link['visuals']):
@@ -606,6 +644,7 @@ class Studio:
     if not isinstance(key,str) or key and not any(t['id']==key for t in self.cartesian_targets):raise ValueError('Target non presente.')
     self.selected_target=key
    elif op=='studio_import':self.import_urdf(request['path'])
+   elif op=='studio_import_eb15':self.import_eb15(request.get('paths'))
    elif op=='studio_default':
     self.idle_configuration();self.load_reference();self.save()
    elif op=='studio_preview':

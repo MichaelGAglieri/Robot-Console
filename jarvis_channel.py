@@ -54,6 +54,9 @@ class JarvisChannel:
                 pass  # A full disk must never prevent STOP.
 
     def start(self):
+        if os.name == 'nt' or not hasattr(socketserver, 'ThreadingUnixStreamServer'):
+            # Private Unix socket with owner checks: macOS and Linux only for now.
+            raise OSError('Canale JARVIS non disponibile su questo sistema.')
         self.folder.mkdir(mode=0o700, parents=True, exist_ok=True)
         info = self.folder.lstat()
         if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid():
@@ -241,7 +244,8 @@ class JarvisChannel:
     def open_robot_port(self, reset):
         """Same as choosing Robot USB and pressing Connetti Mega. With reset, DTR is dropped and raised
         again: the Mega restarts as on every normal connection. Called with the controller lock held."""
-        ports = [p for p in self.c.state()['ports'] if p.startswith('/dev/cu.usbmodem')]
+        import serial_transport
+        ports = [p for p in self.c.state()['ports'] if serial_transport.looks_like_board(p)]
         # Optional per-machine choice; nothing personal is hard-coded in the source.
         preferred = os.environ.get('ROBOT_CONSOLE_PORT', '')
         if preferred and preferred in ports:
@@ -253,11 +257,8 @@ class JarvisChannel:
         self.c.action(dict(op='connect', mode='robot', port=port))
         self.connection_selection = dict(mode='robot', port=port)
         if reset and self.c.fd is not None:
-            import fcntl, struct, termios
-            lines = struct.pack('I', termios.TIOCM_DTR | termios.TIOCM_RTS)
-            fcntl.ioctl(self.c.fd, termios.TIOCMBIC, lines)
-            time.sleep(.12)
-            fcntl.ioctl(self.c.fd, termios.TIOCMBIS, lines)
+            import serial_transport
+            serial_transport.pulse_reset(self.c.fd)
             # The quiet window restarts from the reset, so the bootloader is left alone.
             quiet = self.c.boot_ready_at - self.c.connected_at
             retry = self.c.connected_at - self.c.last_hello

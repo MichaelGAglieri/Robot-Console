@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Robot Console
+Comment=Control console for the DOC 5-DOF robotic arm
+# Replace /path/to/Robot-Console with the folder of this repository, then copy to ~/.local/share/applications/
+Exec=/path/to/Robot-Console/run.sh
+Icon=/path/to/Robot-Console/qtui/icons/app.png
+Terminal=false
+Categories=Development;Engineering;Robotics;

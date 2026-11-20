@@ -9,9 +9,11 @@ Manuale offline della versione locale 2.0.1, build 45. Il progetto è in svilupp
 
 ## 01 · Che cosa fa Robot Console
 
-Robot Console è un’app macOS per comandare un braccio articolato, insegnare pose, ripeterle, osservare un modello 3D e integrare strumenti locali. Le quattro aree in alto sono **Operatore**, **Studio 3D e programmi**, **Diagnostica e ROS 2**, **Assistente**. La guida è consultabile senza Internet: cerca una parola, scegli un capitolo nell’indice oppure usa Capitolo precedente/successivo. Salva manuale esporta il testo completo nella lingua selezionata.
+Robot Console è un’app per macOS, Linux e Windows per comandare un braccio articolato, insegnare pose, ripeterle, osservare un modello 3D e integrare strumenti locali. Le quattro aree in alto sono **Operatore**, **Studio 3D e programmi**, **Diagnostica e ROS 2**, **Assistente**. La guida è consultabile senza Internet: cerca una parola, scegli un capitolo nell’indice oppure usa Capitolo precedente/successivo. Salva manuale esporta il testo completo nella lingua selezionata.
 
-**Il robot DOC ha cinque gradi di libertà**, J1–J5. L’app espone sei canali per configurazioni future; J6 non aggiunge un sesto giunto al modello DOC. Il modello locale è EB-15 con pinza EBG-30, ricostruito da CAD; le quote del modello non dimostrano la calibrazione del robot montato.
+**Il robot DOC ha cinque gradi di libertà**, J1–J5. L’app espone sei canali per configurazioni future; J6 non aggiunge un sesto giunto al modello DOC. Il modello è EB-15 con pinza EBG-30, ricostruito da CAD; le quote del modello non dimostrano la calibrazione del robot montato.
+
+Al primo avvio vedi il **DOC schematico** (capsule, dischi e blocchi con le stesse quote). I pezzi originali ToolBox Robotics hanno licenza CC BY-NC-ND e non sono inclusi: per il **modello dettagliato** scarica da Thingiverse i pacchetti [EB-15](https://www.thingiverse.com/thing:6488872) ed [EBG-30](https://www.thingiverse.com/thing:6460300), poi in **Modello del braccio** premi **Importa pezzi EB-15…** e scegli gli ZIP o gli STL. L’app riconosce i file originali dall’impronta SHA-256 e genera le mesh nella tua cartella dati, solo per uso personale; non condividere i file generati. Mapping, versi e scena restano invariati e le collisioni usano le stesse capsule con entrambi i modelli.
 
 Ci sono tre informazioni diverse da non confondere: il **target virtuale** del modello, gli **angoli comandati** calcolati dagli impulsi e la **posizione misurata** da eventuali sensori. Questa versione non dispone di feedback encoder integrato per correggere il moto. Un movimento disegnato bene o completato nel protocollo seriale non prova che il robot reale abbia raggiunto quel punto.
 
@@ -28,7 +30,7 @@ Le procedure seguenti descrivono il comportamento della build45. `docs/CAMPI_E_S
 
 ## 02 · Primo avvio e prova senza hardware
 
-Apri **Robot Console** dalla cartella Applicazioni del Mac. L’avvio non connette automaticamente la Mega e non carica firmware. Il programma richiede il runtime Python configurato sul computer; Ollama, ROS 2 e Arduino CLI servono solo alle rispettive funzioni. Una copia dell’app non garantisce da sola che su un altro Mac siano presenti tutte le dipendenze.
+Avvia **Robot Console** con `run.sh` (macOS e Linux) o `run.bat` (Windows): al primo avvio crea l’ambiente Python `.venv` con PySide6. Su macOS puoi usare anche l’app SwiftUI dalla cartella Applicazioni. L’avvio non connette automaticamente la Mega e non carica firmware. Ollama, ROS 2 e Arduino CLI servono solo alle rispettive funzioni. Con `--no-hardware` la porta USB non viene mai aperta; con `--data CARTELLA` usi una cartella dati separata.
 
 Per imparare l’interfaccia senza muovere il robot:
 
@@ -44,13 +46,13 @@ Non serve scaricare un modello IA né avviare ROS per queste prove. Prima di pas
 
 ## 03 · Interfaccia, temi, lingua e pannelli
 
-La barra superiore contiene **Eventi**, **Note**, **Guida**, **Lingua**, **Tema** e **STOP**. Puoi scegliere Italiano o English e tema Chiaro, Scuro o Sistema; Sistema segue l’aspetto di macOS. Il colore acceso identifica azioni e selezioni; un pulsante attenuato indica che mancano condizioni per usarlo.
+La barra superiore contiene **Eventi**, **Note**, **Guida**, **Lingua**, **Tema** e **STOP**. Puoi scegliere Italiano o English e tema Chiaro, Scuro o Sistema; Sistema segue l’aspetto del sistema operativo. Il colore acceso identifica azioni e selezioni; un pulsante attenuato indica che mancano condizioni per usarlo.
 
 **Eventi** apre o chiude la barra sinistra, con attività della sessione e chiusura. **Note** mostra gli appunti a destra. Trascina i separatori verticali per regolarne la larghezza; doppio clic ripristina la larghezza standard. Le scorciatoie sono ⌘B per Eventi e ⌥⌘B per Note. La parte centrale usa lo spazio disponibile anche con entrambe le barre chiuse.
 
 I riquadri centrali possono essere regolati **solo in altezza** usando la maniglia inferiore. Adatta ripristina l’altezza naturale del contenuto. Le sezioni richiudibili si espandono cliccando il titolo. In un campo lungo, una griglia o un editor può esserci uno scorrimento interno separato dalla pagina principale.
 
-Le preferenze visive restano su questo Mac. Non sono parametri del firmware e non cambiano i movimenti. I messaggi sopra la pagina spiegano errori o azioni mancanti: leggerli prima di ripetere un comando aiuta a capire quale condizione non è soddisfatta.
+Le preferenze visive restano su questo computer. Non sono parametri del firmware e non cambiano i movimenti. I messaggi sopra la pagina spiegano errori o azioni mancanti: leggerli prima di ripetere un comando aiuta a capire quale condizione non è soddisfatta.
 
 ## 04 · Connessione USB e riconoscimento del firmware
 
@@ -324,7 +326,7 @@ Se la compilazione fallisce, correggi il primo errore significativo nel log. Se 
 
 ## 21 · Comandi vocali del robot e conferma
 
-Questa funzione si trova in **Muovi e osserva → Comandi vocali del robot** ed è distinta dalla dettatura della chat IA. Usa riconoscimento vocale locale Apple nella lingua dell’app e richiede i permessi Microfono e Riconoscimento vocale. Ollama non interpreta questi comandi motore.
+Questa funzione si trova in **Muovi e osserva → Comandi vocali del robot** ed è distinta dalla dettatura della chat IA. Nell’app macOS usa il riconoscimento vocale locale Apple. Nell’app Qt (macOS, Linux, Windows) puoi scrivere il comando nel campo, oppure dettarlo offline con Vosk: installa `vosk` e `sounddevice` (`requirements-optional.txt`) e copia un modello Vosk della lingua (per esempio vosk-model-small-it) nella cartella dati sotto `speech/it` o `speech/en`. Nessun audio lascia il computer. Anche scritta, la conferma resta «sì, confermo» e scade dopo 30 secondi. Ollama non interpreta questi comandi motore.
 
 Premi **Parla al robot**, poi pronuncia una frase chiara. «Muovi J2 di 5 gradi» indica uno spostamento relativo. «Muovi J2 a 5 gradi» indica una destinazione assoluta. «Muovi J1 a 5 gradi, J2 a 3 e J3 a meno 2» prepara un gruppo. «Avvia posa 1» richiama la prima posa con il percorso insegnato, pinza e pausa e resta sulla posa.
 
@@ -380,7 +382,7 @@ Endpoint principali: `GET /v1/health`, `/v1/state`, `/v1/plan`, `/v1/runs/ID`; `
 
 ## 25 · Telecamera, immagini e QR
 
-In **Visione · telecamera locale** scegli un dispositivo, aggiorna l’elenco se necessario e premi **Avvia video**. La prima volta macOS chiede il permesso Telecamera. Se negato, abilitalo nelle impostazioni Privacy di macOS prima di riprovare.
+In **Visione · telecamera locale** scegli un dispositivo, aggiorna l’elenco se necessario e premi **Avvia video**. La prima volta il sistema può chiedere il permesso Telecamera (su macOS per l’app o il terminale che avvia Robot Console); se negato, abilitalo nelle impostazioni Privacy prima di riprovare. Il riconoscimento QR nell’app Qt richiede il pacchetto facoltativo `opencv-python-headless`.
 
 La sezione Video, fotogrammi e codici mostra il flusso locale. **Salva fotogramma…** crea un PNG nella posizione scelta. **Rileva QR** legge i codici visibili nel fotogramma corrente e mostra il testo; non esegue quel testo come comando.
 
@@ -396,7 +398,7 @@ Scrivi una domanda e premi **Invia**. **Parla** detta testo nella casella; Ferma
 
 La spunta **Conversazione libera · IA offline con Ollama** abilita il modello locale. Il pannello distingue installazione rilevata, servizio avviato, modello selezionato e modelli caricati in memoria. **Aggiorna** rilegge lo stato; **Avvia e carica modello** prepara quello scelto. Anche inviare una domanda con IA attiva può avviare il servizio e caricare il modello.
 
-L’app usa modelli già presenti sul Mac e non li scarica automaticamente. Se Ollama manca, usa il link ufficiale; se non ci sono modelli, installane uno con gli strumenti di Ollama e aggiorna l’elenco. Il primo download richiede Internet; con runtime e modello disponibili puoi usare il percorso locale offline.
+L’app usa modelli già presenti sul computer e non li scarica automaticamente. Se Ollama manca, usa il link ufficiale; se non ci sono modelli, installane uno con gli strumenti di Ollama e aggiorna l’elenco. Il primo download richiede Internet; con runtime e modello disponibili puoi usare il percorso locale offline.
 
 **Ferma IA e libera memoria** disabilita la conversazione libera e scarica dalla memoria il modello selezionato, lasciandolo su disco. Se il servizio era stato aperto da questa app viene fermato; se era già usato da altri programmi può restare attivo. Il comando attende che risposta o caricamento siano terminati. Su Apple Silicon la memoria è condivisa: le dimensioni su disco non sono una misura diretta della RAM occupata.
 
@@ -406,7 +408,7 @@ L’app usa modelli già presenti sul Mac e non li scarica automaticamente. Se O
 
 **Attività del robot** conserva fino a 300 eventi recenti della sessione con ora e modalità. Segui ultimi eventi abilita lo scorrimento automatico. Nascondere la barra non cancella gli eventi e non ferma il robot. Il diario IA persistente è distinto da questa finestra recente.
 
-**Note operatore** è un taccuino personale salvato automaticamente su questo Mac. Non viene incluso nei progetti esportati e non viene inviato automaticamente alla chat. Non confonderlo con Ricorda dell’assistente, che crea una voce nel suo diario.
+**Note operatore** è un taccuino personale salvato automaticamente su questo computer. Non viene incluso nei progetti esportati e non viene inviato automaticamente alla chat. Non confonderlo con Ricorda dell’assistente, che crea una voce nel suo diario.
 
 I dati applicativi personali risiedono in `~/Library/Application Support/DOC Regia`; il progetto Studio include modello, mapping, offset, TCP, scena e blocchi. La sequenza del controllore e gli altri dati previsti dall’export seguono il formato corrente. Per spostare lavoro usa Esporta progetto e controlla il risultato su una copia prima di importarlo su un’altra configurazione.
 

@@ -13,9 +13,11 @@ Under **Your sequence → Joint order…**, select **One joint at a time**. Use 
 
 ## 01 · What Robot Console does
 
-Robot Console is a macOS application for controlling an articulated arm, teaching and replaying poses, observing a 3D model and using local integrations. The four workspaces are **Operator**, **3D studio and programs**, **Diagnostics and ROS 2**, and **Assistant**. This guide works offline: search for a word, select a chapter or use Previous/Next chapter. Save manual exports the full text in the selected language.
+Robot Console is an application for macOS, Linux and Windows for controlling an articulated arm, teaching and replaying poses, observing a 3D model and using local integrations. The four workspaces are **Operator**, **3D studio and programs**, **Diagnostics and ROS 2**, and **Assistant**. This guide works offline: search for a word, select a chapter or use Previous/Next chapter. Save manual exports the full text in the selected language.
 
-**The DOC robot has five degrees of freedom**, J1–J5. The application exposes six channels for other configurations; J6 does not add a sixth joint to the DOC model. The supplied local model represents EB-15 and the EBG-30 gripper reconstructed from CAD. Its dimensions do not establish calibration of the assembled robot.
+**The DOC robot has five degrees of freedom**, J1–J5. The application exposes six channels for other configurations; J6 does not add a sixth joint to the DOC model. The model represents EB-15 and the EBG-30 gripper reconstructed from CAD. Its dimensions do not establish calibration of the assembled robot.
+
+On first start you see the **schematic DOC** (capsules, discs and blocks with the same dimensions). The original ToolBox Robotics parts are licensed CC BY-NC-ND and are not included: for the **detailed model** download the [EB-15](https://www.thingiverse.com/thing:6488872) and [EBG-30](https://www.thingiverse.com/thing:6460300) packages from Thingiverse, then in **Arm model** press **Import EB-15 parts…** and choose the ZIP or STL files. The app recognises the original files by SHA-256 and builds the meshes in your data folder, for personal use only; do not share the generated files. Mapping, signs and scene are kept and collisions use the same capsules with both models.
 
 Keep three kinds of information separate: the model's **virtual target**, **commanded angles** calculated from pulses, and **measured positions** from any sensors. This version has no integrated encoder feedback that corrects motor movement. A convincing animation or a completed serial command does not prove that the physical robot reached that location.
 
@@ -32,7 +34,7 @@ The following procedures describe build45. The bundled `docs/CAMPI_E_SEQUENZE.md
 
 ## 02 · First launch and testing without hardware
 
-Open **Robot Console** from Applications. Launching does not automatically connect the Mega or upload firmware. The app needs its configured Python runtime; Ollama, ROS 2 and Arduino CLI are needed only for their respective features. Copying the app alone does not establish that another Mac has every dependency.
+Start **Robot Console** with `run.sh` (macOS and Linux) or `run.bat` (Windows): the first start creates the `.venv` Python environment with PySide6. On macOS the SwiftUI app in Applications is also available. Launching does not automatically connect the Mega or upload firmware. Ollama, ROS 2 and Arduino CLI are needed only for their respective features. `--no-hardware` never opens the USB port; `--data FOLDER` uses a separate data folder.
 
 To learn without moving the robot:
 
@@ -48,13 +50,13 @@ Neither an AI model nor ROS is needed for these tests. Read the USB, HOME, ENABL
 
 ## 03 · Interface, themes, language and panels
 
-The top bar contains **Events**, **Notes**, **Guide**, **Language**, **Theme** and **STOP**. Select Italiano or English and Light, Dark or System appearance. System follows macOS appearance. Highlighted controls show selections and available actions; dim controls usually mean a prerequisite is missing.
+The top bar contains **Events**, **Notes**, **Guide**, **Language**, **Theme** and **STOP**. Select Italiano or English and Light, Dark or System appearance. System follows the operating system appearance. Highlighted controls show selections and available actions; dim controls usually mean a prerequisite is missing.
 
 **Events** toggles the left activity/session sidebar. **Notes** toggles the right notebook. Drag their dividers to change width; double-click to restore the standard width. Shortcuts are ⌘B for Events and ⌥⌘B for Notes. The central area uses the remaining space with either or both sidebars hidden.
 
 Central panels resize **vertically only**, using the lower handle. Fit restores natural content height. Disclosure headings expand advanced sections. A long form, grid or editor may have its own scrollbar inside the main page.
 
-Appearance preferences stay on this Mac. They are not firmware parameters and do not alter movement. Read messages above the workspace before repeating a failed action; they describe missing conditions or errors.
+Appearance preferences stay on this computer. They are not firmware parameters and do not alter movement. Read messages above the workspace before repeating a failed action; they describe missing conditions or errors.
 
 ## 04 · USB connection and firmware identification
 
@@ -326,7 +328,7 @@ For a compile error, inspect the first meaningful diagnostic. For upload failure
 
 ## 21 · Robot voice commands and confirmation
 
-Open **Move and observe → Robot voice commands**. This differs from AI chat dictation. It uses Apple's local speech recognition in the app language and needs Microphone and Speech Recognition permissions. Ollama does not interpret these motor commands.
+Open **Move and observe → Robot voice commands**. This differs from AI chat dictation. The macOS app uses Apple's local speech recognition. In the Qt app (macOS, Linux, Windows) type the command in the field, or dictate it offline with Vosk: install `vosk` and `sounddevice` (`requirements-optional.txt`) and copy a Vosk model for the language (for example vosk-model-small-en-us) into the data folder under `speech/en` or `speech/it`. No audio leaves the computer. Typed or spoken, the confirmation is still “yes, confirm” and expires after 30 seconds. Ollama does not interpret these motor commands.
 
 Press **Talk to robot** and speak clearly. “Move J2 by 5 degrees” requests a relative change. “Move J2 to 5 degrees” is absolute. “Move J1 to 5 degrees, J2 to 3 and J3 to minus 2” prepares a simultaneous group. “Start pose 1” follows the first pose's taught route, gripper and dwell and remains there.
 
@@ -382,11 +384,11 @@ Main routes: `GET /v1/health`, `/v1/state`, `/v1/plan`, `/v1/runs/ID`; `POST /v1
 
 ## 25 · Camera, images and QR codes
 
-In **Vision · local camera**, select a device, refresh if necessary and press **Start video**. macOS requests Camera permission on first use. If denied, update the system Privacy setting before trying again.
+In **Vision · local camera**, select a device, refresh if necessary and press **Start video**. The system may request Camera permission on first use (on macOS for the app or terminal that starts Robot Console); if denied, update the Privacy setting before trying again. QR recognition in the Qt app needs the optional `opencv-python-headless` package.
 
 Video, frames and codes shows a local feed. **Save frame…** writes a PNG where you choose. **Detect QR** reads visible codes from the current frame and shows their text; it does not execute that text as instructions.
 
-**Stop video** releases the session; leaving the camera section also stops acquisition. External cameras must be recognized by macOS. Video is not automatically sent to Ollama, a cloud service or ROS.
+**Stop video** releases the session; leaving the camera section also stops acquisition. External cameras must be recognized by the operating system. Video is not automatically sent to Ollama, a cloud service or ROS.
 
 Optical calibration, 3D object pose, AprilTag, tracking and automatic grasping are not implemented here. Mapping pixels to robot coordinates needs camera/base calibration and an additional validated workflow.
 
@@ -440,7 +442,7 @@ Disconnect control and prepare the bench before firmware or wiring changes. Do n
 
 **Physical motion wrong while graphics look right:** bench-check DIP/jumpers, microstepping, reduction, directions, coupling, supplies and calibration. Do not infer a cause from graphics alone or automatically compensate a fault with larger angles or current.
 
-**AI or ROS unavailable:** these are optional. Check runtime/project, installed model, service state and logs; manual Preview does not depend on them. **Microphone/camera denied:** adjust the relevant macOS Privacy permission and retry explicitly.
+**AI or ROS unavailable:** these are optional. Check runtime/project, installed model, service state and logs; manual Preview does not depend on them. **Microphone/camera denied:** adjust the relevant system Privacy permission and retry explicitly.
 
 ## 30 · Glossary and current limits
 

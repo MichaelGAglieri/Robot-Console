@@ -21,10 +21,8 @@ class OllamaLocal:
   if monitor:threading.Thread(target=self.watch,daemon=True).start()
  @staticmethod
  def find_binary():
-  candidates=[Path('/Applications/Ollama.app/Contents/Resources/ollama'),Path.home()/'Applications/Ollama.app/Contents/Resources/ollama',Path('/opt/homebrew/bin/ollama'),Path('/usr/local/bin/ollama')]
-  located=shutil.which('ollama')
-  if located:candidates.append(Path(located))
-  return next((str(p) for p in candidates if p.is_file() and os.access(p,os.X_OK)),'')
+  from platform_support import find_ollama
+  return find_ollama()
  def api(self,path,payload=None,timeout=2):
   if path not in ('version','tags','ps','show','generate','chat'):raise ValueError('API non consentita')
   req=urllib.request.Request('http://127.0.0.1:11434/api/'+path,data=None if payload is None else json.dumps(payload).encode(),headers={'Content-Type':'application/json'})

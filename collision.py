@@ -158,7 +158,13 @@ class Geometry:
         for joint in model['joints']:
             parent_of[joint['child']] = joint['parent']
             if joint['kind'] == 'fixed': groups[find(joint['child'])] = find(joint['parent'])
+        fixed = model.get('collision_capsules') or {}
         for link in model['links']:
+            if link['name'] in fixed:
+                # Reference envelope shipped with the model: independent of the display meshes.
+                for capsule in fixed[link['name']]:
+                    self.bodies.append(dict(name=link['name'], link=link['name'], a=list(capsule['a']), b=list(capsule['b']), r=capsule['r']))
+                continue
             points = [p for visual in link['visuals'] for p in visual_points(visual)]
             for capsule in fit_capsules(points):
                 self.bodies.append(dict(name=link['name'], link=link['name'], **capsule))

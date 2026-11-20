@@ -1,8 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (c) 2026 Michael Giuseppe Aglieri
-import os,pty,time,unittest,threading
+import os,time,unittest,threading
+try:import pty
+except ImportError:pty=None # Windows: no pseudo-terminals
 from unittest.mock import patch
-import server
+import serial_transport,server
+@unittest.skipIf(pty is None,'pseudo-terminals are POSIX only')
 class Handshake(unittest.TestCase):
  def test_retries_boot_and_recognizes_then_confirms_speed_without_arm(self):
   master,slave=pty.openpty();path=os.ttyname(slave);received=[];stop=threading.Event()
@@ -20,7 +23,7 @@ class Handshake(unittest.TestCase):
      if line.startswith(b'speed '):os.write(master,b'SPEED 5.00\r\n')
   t=threading.Thread(target=board);t.start();c=server.Controller()
   try:
-   with patch.object(server.glob,'glob',return_value=[path]),patch.object(server.fcntl,'ioctl') as ioctl:
+   with patch.object(serial_transport,'candidate_ports',return_value=[path]),patch.object(serial_transport.fcntl,'ioctl') as ioctl:
     c.action(dict(op='connect',mode='robot',port=path))
     deadline=time.monotonic()+6
     while not c.speed_confirmed and time.monotonic()<deadline:c.action(dict(op='heartbeat'));time.sleep(.03)

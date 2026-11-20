@@ -10,9 +10,10 @@ class ROSLink:
   root=Path(project).expanduser().resolve()
   if not (root/'pixi.toml').is_file():raise ValueError('Seleziona un progetto ROS/Pixi con pixi.toml.')
   if type(domain)!=int or not 0<=domain<=232:raise ValueError('Dominio ROS ammesso: 0–232.')
-  pixi=shutil.which('pixi') or '/opt/homebrew/bin/pixi'
-  if not Path(pixi).is_file():raise ValueError('Pixi non disponibile.')
-  if not (root/'.pixi/envs/default/bin/python').exists():raise ValueError('Ambiente non preparato: esegui pixi install nel progetto. Nessuna installazione automatica.')
+  from platform_support import find_pixi,pixi_env_binary
+  pixi=find_pixi()
+  if not pixi:raise ValueError('Pixi non disponibile.')
+  if not pixi_env_binary(root,'python').exists():raise ValueError('Ambiente non preparato: esegui pixi install nel progetto. Nessuna installazione automatica.')
   self.domain=domain;self.project=str(root);self.health={};self.started=time.time()
   env={**os.environ,'ROS_DOMAIN_ID':str(domain),'PYTHONUNBUFFERED':'1','ROS_AUTOMATIC_DISCOVERY_RANGE':'LOCALHOST'}
   self.process=subprocess.Popen([pixi,'run','--frozen','--no-install','--manifest-path',str(root/'pixi.toml'),'python',str(Path(__file__).with_name('ros_observer.py')),str(self.folder/'ros_state.json')],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,env=env)

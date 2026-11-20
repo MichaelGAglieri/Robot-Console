@@ -1,15 +1,23 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (c) 2026 Michael Giuseppe Aglieri
-import sys,json,os,fcntl
+"""Controller process shared by the macOS (Swift) and cross-platform (Qt) front ends.
+One JSON request per stdin line, one JSON state reply per stdout line. EOF = STOP and exit."""
+import sys,json,os
 sys.dont_write_bytecode=True
 from pathlib import Path
-folder=Path(os.environ.get('DOC_REGIA_DATA',str(Path.home()/'Library/Application Support/DOC Regia')))
+here=Path(__file__).resolve().parent
+for path in (here,here.parent):
+ if (path/'server.py').is_file() and str(path) not in sys.path:sys.path.insert(0,str(path))
+if os.name=='nt':
+ # JSON is UTF-8 on every platform; Windows pipes default to the ANSI code page.
+ sys.stdin.reconfigure(encoding='utf-8');sys.stdout.reconfigure(encoding='utf-8')
+from platform_support import data_folder,InstanceLock
+folder=data_folder()
 folder.mkdir(parents=True,exist_ok=True)
 os.environ['DOC_REGIA_DATA']=str(folder)
 # One native controller per user, including when opened from different copies.
-lock=open(folder/'controller.lock','w')
-try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
-except OSError:
+lock=InstanceLock(folder)
+if not lock.acquire():
  print(json.dumps({'error':'Robot Console è già aperta.'}),flush=True);sys.exit(1)
 import server
 from assistant_local import Journal,Assistant

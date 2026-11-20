@@ -2,6 +2,7 @@
 # Copyright (c) 2026 Michael Giuseppe Aglieri
 """Arduino firmware workflow. Upload is possible only after explicit UI confirmation."""
 import glob, hashlib, json, os, shutil, subprocess, tempfile, threading, time
+import serial_transport
 from pathlib import Path
 
 FQBN='arduino:avr:mega:cpu=atmega2560'
@@ -17,10 +18,8 @@ class FirmwareTools:
   self.process=None;self.thread=None
  @staticmethod
  def find_cli():
-  candidates=[Path(__file__).parent/'Tools/arduino-cli',Path('/opt/homebrew/bin/arduino-cli'),Path('/usr/local/bin/arduino-cli'),Path('/Applications/Arduino IDE.app/Contents/Resources/app/lib/backend/resources/arduino-cli'),Path.home()/'Applications/Arduino IDE.app/Contents/Resources/app/lib/backend/resources/arduino-cli']
-  found=shutil.which('arduino-cli')
-  if found:candidates.append(Path(found))
-  return next((str(p) for p in candidates if p.is_file() and os.access(p,os.X_OK)),'')
+  from platform_support import find_arduino_cli
+  return find_arduino_cli(Path(__file__).parent)
  def state(self):
   with self.lock:return dict(available=bool(self.cli),tool=self.cli,busy=self.busy,phase=self.phase,status=self.status,error=self.error,logs=self.logs[-100:],boards=self.boards[:],success=self.success)
  def log(self,text):
@@ -66,7 +65,7 @@ class FirmwareTools:
   for item in ports:
    port=item.get('port',{})
    address=port.get('address','')
-   if port.get('protocol')!='serial' or not address.startswith(('/dev/cu.usbmodem','/dev/cu.usbserial','/dev/cu.wchusbserial')):continue
+   if port.get('protocol')!='serial' or not serial_transport.looks_like_board(address):continue
    matches=item.get('matching_boards',[])
    known=[b.get('fqbn','') for b in matches]
    mega=any(b=='arduino:avr:mega' or b.startswith('arduino:avr:mega:') for b in known)
