@@ -13,6 +13,7 @@ jobs:
     env:
       QT_QPA_PLATFORM: offscreen
       PYTHONIOENCODING: utf-8
+      PYTHONUTF8: "1"   # same as the app: the controller runs in UTF-8 mode
     steps:
       - uses: actions/checkout@v7.0.1
         with:

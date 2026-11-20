@@ -257,7 +257,7 @@ class ReferenceModelTests(StudioFixture):
  def test_outdated_bundled_reference_is_upgraded_with_backup(self):
   reference=Studio(self.folder,self.c,builtin=True);reference.mapping['joint_2']=3;reference.calibration['joint_2']['sign']=-1;reference.calibration['joint_2']['offset']=1.2
   reference.raw=reference.raw.replace('<robot name="','<robot name="vecchio ');reference.obstacles=[dict(name='banco',center=[.5,0,0],size=[.1,.1,.1])];reference.save()
-  upgraded=Studio(self.folder,self.c,builtin=True);bundled=(Path(__file__).parent/'models/doc5/doc5.urdf').read_text()
+  upgraded=Studio(self.folder,self.c,builtin=True);bundled=(Path(__file__).parent/'models/doc5/doc5.urdf').read_text(encoding='utf-8')
   self.assertEqual(upgraded.raw,bundled);self.assertEqual(upgraded.mapping['joint_2'],3);self.assertEqual(upgraded.calibration['joint_2'],dict(sign=-1,offset=0))
   self.assertEqual(upgraded.obstacles[0]['name'],'banco');self.assertEqual(len(list((self.folder/'studio').glob('project-prima-modello-*.json'))),1);self.c.write.assert_not_called()
   self.assertEqual(Studio(self.folder,self.c,builtin=True).raw,bundled);self.assertEqual(len(list((self.folder/'studio').glob('project-prima-modello-*.json'))),1)

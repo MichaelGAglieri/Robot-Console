@@ -28,6 +28,7 @@ class Bridge(QObject):
         env = QProcessEnvironment.systemEnvironment()
         env.insert('PYTHONUNBUFFERED', '1')
         env.insert('PYTHONIOENCODING', 'utf-8')
+        env.insert('PYTHONUTF8', '1')  # files are UTF-8 on every system (Windows defaults to cp1252)
         for key, value in (environment or {}).items():
             env.insert(key, value)
         self.process.setProcessEnvironment(env)
@@ -40,7 +41,7 @@ class Bridge(QObject):
             # Packaged app: the bundled executable runs the controller itself.
             self.process.start(sys.executable, ['--controller'])
         else:
-            self.process.start(sys.executable, ['-u', str(ROOT / 'native' / 'native_bridge.py')])
+            self.process.start(sys.executable, ['-X', 'utf8', '-u', str(ROOT / 'native' / 'native_bridge.py')])
         if not self.process.waitForStarted(8000):
             self.failed.emit('Impossibile avviare il controllo: ' + self.process.errorString())
             return False

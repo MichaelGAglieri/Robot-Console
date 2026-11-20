@@ -41,7 +41,7 @@ def run(*args, **kw):
 
 def pyinstaller():
     sep = os.pathsep
-    args = [sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean', '--windowed', '--name', NAME,
+    args = [sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean', '--windowed', '--python-option', 'X utf8', '--name', NAME,
             '--distpath', DIST, '--workpath', BUILD, '--specpath', BUILD,
             '--paths', ROOT, '--paths', ROOT / 'native',
             '--hidden-import', 'native_bridge', '--hidden-import', 'serial',
