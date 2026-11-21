@@ -326,9 +326,13 @@ class Controller:
   with self.lock:
    if gen!=self.generation:raise ValueError('Interrotto')
    self.check();self.write(command+'\n');self.grip=command;self.busy=True
-  for _ in range(30):
+  # At least 1.5 s for the servo, against a deadline: late wake-ups of short sleeps must not add up.
+  end=time.monotonic()+1.5
+  while True:
    if gen!=self.generation:raise ValueError('Interrotto')
-   time.sleep(.05)
+   left=end-time.monotonic()
+   if left<=0:break
+   time.sleep(min(.05,left))
  def group_plan(self,deltas,*,starts=None,scale=1.):
   # Preview callers may plan a later segment without mutating commanded positions.
   # `scale` is a program instruction's share of the Muovi e osserva joint speeds.
