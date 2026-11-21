@@ -6,7 +6,7 @@ The controller sends link frames as row-major 4x4 matrices in metres (URDF, Z up
 The scene works in millimetres inside a node rotated so that Z points up on screen.
 Nothing here commands the robot.
 """
-import math, struct
+import math, os, struct
 from pathlib import Path
 import numpy as np
 from PySide6.QtCore import QByteArray, QObject, Property, QUrl, Signal, Slot
@@ -255,7 +255,7 @@ class Scene(QObject):
         self.link_parts = {}
         self.ghost_parts = {}
         self.key = None
-        self._yaw, self._pitch, self._distance, self._target, self._fov = -45.0, 22.0, 1200.0, QVector3D(0, 0, 300), 45.0
+        self._yaw, self._pitch, self._distance, self._target, self._fov = 45.0, 24.7, 1200.0, QVector3D(0, 0, 300), 45.0
         self._background = QColor('#0E1114')
         self.user_adjusted = False
         self.bounds = None
@@ -272,6 +272,9 @@ class Scene(QObject):
     target = Property(QVector3D, lambda self: self._target, notify=cameraChanged)
     fov = Property(float, lambda self: self._fov, notify=cameraChanged)
     background = Property(QColor, lambda self: self._background, notify=backgroundChanged)
+    # Light levels matched by eye to the macOS SceneKit view (ambient 180, omni 450).
+    lamp = Property(float, lambda self: float(os.environ.get('ROBOT_CONSOLE_LAMP', 0.85)), constant=True)
+    ambient = Property(float, lambda self: float(os.environ.get('ROBOT_CONSOLE_AMBIENT', 0.3)), constant=True)
 
     @Slot(float, float)
     def orbit(self, dx, dy):
@@ -363,7 +366,8 @@ class Scene(QObject):
         radius = max(.15, float(np.linalg.norm(hi - lo)) / 2)
         aspect = max(.35, width / max(1, height))
         distance = radius / max(.1, math.sin(math.pi / 8) * min(1, aspect)) * 1.15
-        self._yaw, self._pitch = {'front': (0.0, 2.0), 'side': (90.0, 2.0), 'top': (0.0, 89.0)}.get(preset, (-45.0, 26.0))
+        # Same directions as the macOS app: 3D (1, -1, 0.65), front (0, -1, 0.04), side (1, 0, 0.04), top.
+        self._yaw, self._pitch = {'front': (0.0, 2.3), 'side': (90.0, 2.3), 'top': (0.0, 89.9)}.get(preset, (45.0, 24.7))
         self._target = QVector3D(*(center * MM))
         self._distance = distance * MM
         self.user_adjusted = False
@@ -404,8 +408,14 @@ Item {
                     }
                 }
             }
-            DirectionalLight { eulerRotation.x: -35; eulerRotation.z: 30; brightness: 1.1; ambientColor: Qt.rgba(0.35, 0.36, 0.38, 1) }
-            DirectionalLight { eulerRotation.x: 120; eulerRotation.z: -150; brightness: 0.45 }
+            // Same light rig as the macOS app (SceneKit): soft ambient plus one lamp at (1, -1, 2) m,
+            // without distance falloff, on matte (Lambert) materials.
+            PointLight {
+                position: Qt.vector3d(1000, -1000, 2000)
+                brightness: scene.lamp
+                constantFade: 1; linearFade: 0; quadraticFade: 0
+                ambientColor: Qt.rgba(scene.ambient, scene.ambient, scene.ambient, 1)
+            }
             Repeater3D {
                 model: scene.parts
                 delegate: Model {
@@ -415,13 +425,11 @@ Item {
                     rotation: modelData.rotation
                     scale: modelData.scale
                     visible: modelData.visible
-                    materials: PrincipledMaterial {
-                        baseColor: modelData.color
-                        roughness: 0.62
-                        metalness: 0.08
+                    materials: DefaultMaterial {
+                        diffuseColor: modelData.color
+                        specularAmount: 0
                         opacity: modelData.opacity
-                        alphaMode: modelData.opacity < 1 ? PrincipledMaterial.Blend : PrincipledMaterial.Opaque
-                        lighting: modelData.unlit ? PrincipledMaterial.NoLighting : PrincipledMaterial.FragmentLighting
+                        lighting: modelData.unlit ? DefaultMaterial.NoLighting : DefaultMaterial.FragmentLighting
                         cullMode: Material.NoCulling
                     }
                 }
@@ -435,13 +443,11 @@ Item {
                     rotation: modelData.rotation
                     scale: modelData.scale
                     visible: modelData.visible
-                    materials: PrincipledMaterial {
-                        baseColor: modelData.color
-                        roughness: 0.62
-                        metalness: 0.08
+                    materials: DefaultMaterial {
+                        diffuseColor: modelData.color
+                        specularAmount: 0
                         opacity: modelData.opacity
-                        alphaMode: modelData.opacity < 1 ? PrincipledMaterial.Blend : PrincipledMaterial.Opaque
-                        lighting: modelData.unlit ? PrincipledMaterial.NoLighting : PrincipledMaterial.FragmentLighting
+                        lighting: modelData.unlit ? DefaultMaterial.NoLighting : DefaultMaterial.FragmentLighting
                         cullMode: Material.NoCulling
                     }
                 }

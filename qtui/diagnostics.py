@@ -6,7 +6,7 @@ from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QFileDialog, QLabel, QSizePolicy, QVBoxLayout, QWidget
 from .i18n import F, T
 from .model import parse_int
-from .widgets import Card, Disclosure, button, caption, checkbox, clear_layout, combo, label, line, row, set_combo_items, set_role
+from .widgets import Card, Disclosure, button, caption, checkbox, clear_layout, combo, label, line, row, set_combo_items, set_role, hline
 from . import theme
 
 SERIES = ['#A3EA2F', '#3E8EF7', '#FFB020', '#E5484D', '#B07CF0', '#2FC4B2']
@@ -75,6 +75,7 @@ class OutputIOPanel(QWidget):
         layout.setContentsMargins(0, 8, 0, 0)
         self.name = line('Nome uscita', 170)
         self.define = button('Definisci uscita', None, lambda: m.send('studio_output_add', dict(name=self.name.text())))
+        layout.addWidget(hline())
         layout.addLayout(row(label('Uscite digitali e adattatori', 'section'), None, self.name, self.define))
         self.items = QVBoxLayout()
         layout.addLayout(self.items)
@@ -164,6 +165,7 @@ class LocalAPIPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 8, 0, 0)
         self.toggle = button('Avvia API locale', None, self._toggle)
+        layout.addWidget(hline())
         layout.addLayout(row(label('API Python · programmi e I/O', 'section'), None, self.toggle))
         self.url = label('', 'mono', selectable=True)
         self.copy = button('Copia token di questa sessione', None, self._copy)

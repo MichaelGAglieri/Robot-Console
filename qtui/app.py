@@ -4,14 +4,15 @@
 import os, sys, time
 from pathlib import Path
 from PySide6.QtCore import QEvent, QSettings, Qt, QTimer, QUrl
-from PySide6.QtGui import QAction, QActionGroup, QDesktopServices, QGuiApplication, QIcon, QKeySequence, QShortcut
+from PySide6.QtGui import QAction, QActionGroup, QDesktopServices, QGuiApplication, QIcon, QKeySequence, QPainter, QShortcut
 from PySide6.QtWidgets import (QApplication, QDialog, QFrame, QHBoxLayout, QLineEdit, QListWidget, QMainWindow, QPlainTextEdit,
-                               QScrollArea, QSplitter, QStackedWidget, QTextBrowser, QTextEdit, QVBoxLayout, QWidget, QAbstractSpinBox,
+                               QScrollArea, QSplitter, QSplitterHandle, QStackedWidget, QTextBrowser, QTextEdit, QVBoxLayout, QWidget, QAbstractSpinBox,
                                QComboBox)
 from . import __version__, i18n, theme
 from .i18n import F, T
 from .model import AppModel
-from .widgets import Segmented, StatusChip, button, caption, checkbox, choose, clear_layout, combo, confirm, label, row, select_combo, well
+from .widgets import (Segmented, StatusChip, button, caption, checkbox, choose, clear_layout, combo, confirm, icon_label, label, retint, row,
+                      select_combo, tinted, well)
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKSPACES = [('operator', 'Operatore'), ('studio', 'Studio 3D e programmi'), ('diagnostics', 'Diagnostica e ROS 2'), ('assistant', 'Assistente')]
@@ -96,16 +97,18 @@ class SessionSidebar(QFrame):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 14, 14, 14)
         layout.setSpacing(12)
-        title = label('▤  ' + T('Attività del robot').upper(), wrap=False)
+        title = label(T('Attività del robot').upper(), wrap=False)
         title.setObjectName('SidebarTitle')
-        layout.addWidget(title)
+        layout.addLayout(row(icon_label('list'), title, None, spacing=7))
         self.status = caption()
         layout.addWidget(self.status)
         self.follow = checkbox('Segui ultimi eventi')
+        self.follow.setProperty('role', 'caption')
         self.follow.setChecked(True)
         layout.addWidget(self.follow)
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         holder = QWidget()
         self.events = QVBoxLayout(holder)
         self.events.setSpacing(10)
@@ -118,7 +121,9 @@ class SessionSidebar(QFrame):
         rule.setObjectName('CardRule')
         rule.setFixedHeight(1)
         layout.addWidget(rule)
-        layout.addWidget(label('Sessione e chiusura', 'section'))
+        section = label('Sessione e chiusura', wrap=False)
+        section.setObjectName('SidebarSection')
+        layout.addWidget(section)
         self.quit = button('HOME e chiudi l’app', None, window.close)
         layout.addWidget(self.quit)
         layout.addWidget(caption('Torna a HOME e verifica la posizione prima di uscire.', small=True))
@@ -143,7 +148,7 @@ class SessionSidebar(QFrame):
                               caption('Anteprima' if e.get('mode') == 'demo' else 'Robot USB', small=True)))
             text = label(e.get('text', ''), 'mono', selectable=True)
             box.addWidget(text)
-            self.events.addWidget(well(box, 'Well', 9))
+            self.events.addWidget(well(box, 'WellEvent', 9))
         self.events.addStretch(1)
 
 
@@ -155,11 +160,12 @@ class OperatorNotes(QFrame):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(12)
-        title = label('✎  ' + T('Note operatore').upper(), wrap=False)
+        title = label(T('Note operatore').upper(), wrap=False)
         title.setObjectName('SidebarTitle')
-        layout.addWidget(title)
+        layout.addLayout(row(icon_label('note'), title, None, spacing=7))
         layout.addWidget(caption('Appunti, misure e idee per la sessione.'))
         self.text = QPlainTextEdit(settings.value('operatorNotes', '', str))
+        self.text.setObjectName('Notes')
         self.text.textChanged.connect(lambda: settings.setValue('operatorNotes', self.text.toPlainText()))
         layout.addWidget(self.text, 1)
         layout.addWidget(caption('Salvate automaticamente su questo computer. Restano separate dai progetti esportati e dalla memoria dell’IA.', small=True))
@@ -249,6 +255,34 @@ class Guide(QDialog):
             Path(path).write_text(self.source, encoding='utf-8')
 
 
+class LineHandle(QSplitterHandle):
+    """5-point hit area drawn as a 1-point line, like the macOS sidebar dividers."""
+
+    def paintEvent(self, _event):
+        p = QPainter(self)
+        p.fillRect(self.width() // 2, 0, 1, self.height(), theme.color('border'))
+
+    def mouseDoubleClickEvent(self, _event):
+        splitter = self.splitter()
+        sizes = splitter.sizes()
+        index = splitter.indexOf(self)
+        side = 0 if index == 1 else len(sizes) - 1  # double click: default sidebar width
+        delta = 220 - sizes[side]
+        sizes[side] = 220
+        sizes[1] -= delta
+        splitter.setSizes(sizes)
+
+
+class LineSplitter(QSplitter):
+    def __init__(self):
+        super().__init__(Qt.Horizontal)
+        self.setHandleWidth(5)
+        self.setChildrenCollapsible(False)
+
+    def createHandle(self):
+        return LineHandle(self.orientation(), self)
+
+
 class MainWindow(QMainWindow):
     def __init__(self, m, settings):
         super().__init__()
@@ -268,9 +302,11 @@ class MainWindow(QMainWindow):
         outer.addWidget(rule)
         bar = QFrame()
         bar.setObjectName('Workspace')
-        self.workspace = Segmented(WORKSPACES, settings.value('workspace', 'operator', str))
+        self.workspace = Segmented(WORKSPACES, settings.value('workspace', 'operator', str), segment_width=150)
         self.workspace.changed.connect(self.set_workspace)
-        bar.setLayout(row(None, self.workspace, None))
+        area = label('Area di lavoro', wrap=False)
+        area.setObjectName('WorkspaceLabel')
+        bar.setLayout(row(None, area, self.workspace, None, spacing=12))
         bar.layout().setContentsMargins(20, 10, 20, 10)
         outer.addWidget(bar)
         self.banner = QFrame()
@@ -281,9 +317,12 @@ class MainWindow(QMainWindow):
         outer.addWidget(_padded(self.banner))
         self.approval = ApprovalBanner(m)
         outer.addWidget(_padded(self.approval))
-        self.splitter = QSplitter(Qt.Horizontal)
+        self.splitter = LineSplitter()
         self.session = SessionSidebar(m, self)
         self.notes = OperatorNotes(settings)
+        for side in (self.session, self.notes):
+            side.setMinimumWidth(200)
+            side.setMaximumWidth(340)
         self.stack = QStackedWidget()
         self.splitter.addWidget(self.session)
         self.splitter.addWidget(self.stack)
@@ -291,7 +330,7 @@ class MainWindow(QMainWindow):
         self.splitter.setStretchFactor(1, 1)
         self.splitter.setCollapsible(1, False)
         sizes = settings.value('splitter', None)
-        self.splitter.setSizes([int(x) for x in sizes] if sizes else [230, 980, 230])
+        self.splitter.setSizes([int(x) for x in sizes] if sizes else [220, 1000, 220])
         self.splitter.splitterMoved.connect(lambda *_: settings.setValue('splitter', self.splitter.sizes()))
         outer.addWidget(self.splitter, 1)
         self.setCentralWidget(central)
@@ -321,10 +360,9 @@ class MainWindow(QMainWindow):
         layout = QHBoxLayout(header)
         layout.setContentsMargins(20, 12, 20, 12)
         layout.setSpacing(12)
-        mark = label('▣', wrap=False)
+        mark = icon_label('cpu', 'ink', 17)
         mark.setObjectName('BrandMark')
         mark.setFixedSize(30, 30)
-        mark.setAlignment(Qt.AlignCenter)
         brand = label('ROBOT CONSOLE', wrap=False)
         brand.setObjectName('Brand')
         layout.addWidget(mark)
@@ -335,25 +373,32 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.status_chip)
         layout.addWidget(self.mode_chip)
         sep = QFrame()
+        sep.setObjectName('HeaderSeparator')
         sep.setFixedSize(1, 24)
-        sep.setStyleSheet('background: rgba(255,255,255,0.12);')
         layout.addWidget(sep)
-        self.events_toggle = button('Eventi', 'header', None, 'Mostra o nascondi attività del robot')
-        self.notes_toggle = button('Note', 'header', None, 'Mostra o nascondi note operatore')
+        self.events_toggle = button('Eventi', 'header', None, 'Mostra o nascondi attività del robot', icon='sidebar-left')
+        self.notes_toggle = button('Note', 'header', None, 'Mostra o nascondi note operatore', icon='sidebar-right')
         for b in (self.events_toggle, self.notes_toggle):
             b.setCheckable(True)
         self.events_toggle.toggled.connect(lambda v: self.toggle_sidebar(self.session, 'showSession', v))
         self.notes_toggle.toggled.connect(lambda v: self.toggle_sidebar(self.notes, 'showNotes', v))
-        guide = button('Guida', 'header', lambda: Guide(self).exec())
+        guide = button('Guida', 'header', lambda: Guide(self).exec(), icon='book')
         for b in (self.events_toggle, self.notes_toggle, guide):
             layout.addWidget(b)
         self.language = combo([('it', 'Italiano'), ('en', 'English')], self.set_language)
         select_combo(self.language, i18n.language())
+        self.language.setAccessibleName(T('Lingua dell’app'))
         self.appearance = combo([('system', 'Sistema'), ('light', 'Chiara'), ('dark', 'Scura')], self.set_appearance)
         select_combo(self.appearance, self.settings.value('appearance', 'system', str))
-        layout.addWidget(self.language)
-        layout.addWidget(self.appearance)
-        stop = button('■ STOP', 'danger', self.stop, 'Arresta subito ogni movimento (Esc)')
+        self.appearance.setAccessibleName(T('Tema dell’app'))
+        self.appearance.setToolTip(T('Chiara, Scura oppure Sistema per seguire automaticamente l’aspetto di macOS'))
+        for text, picker in (('Lingua', self.language), ('Tema', self.appearance)):
+            picker.setMinimumWidth(96)
+            layout.addSpacing(6)
+            layout.addWidget(label(text, wrap=False))
+            layout.addWidget(picker)
+        layout.addSpacing(6)
+        stop = button('STOP', 'danger', self.stop, 'Arresta subito ogni movimento (Esc)', icon='stop')
         layout.addWidget(stop)
         return header
 
@@ -372,7 +417,7 @@ class MainWindow(QMainWindow):
         p['limits'] = LimitsPanel(m, self)
         p['motion'] = MotionPanel(m, self)
         p['sequence'] = SequencePanel(m, self)
-        arm_card = Card('Braccio 3D · target virtuale')
+        arm_card = Card('Braccio 3D · target virtuale', resizable=False)
         arm_card.arm = ArmPanel(m, self)
         arm_card.add(arm_card.arm)
         arm_card.refresh = arm_card.arm.refresh
@@ -467,6 +512,7 @@ class MainWindow(QMainWindow):
     def set_appearance(self, value):
         self.settings.setValue('appearance', value)
         theme.apply(QApplication.instance(), value)
+        retint(self)
         self.refresh()
 
     def stop(self):

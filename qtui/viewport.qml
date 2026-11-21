@@ -32,8 +32,14 @@ Item {
                     }
                 }
             }
-            DirectionalLight { eulerRotation.x: -35; eulerRotation.z: 30; brightness: 1.1; ambientColor: Qt.rgba(0.35, 0.36, 0.38, 1) }
-            DirectionalLight { eulerRotation.x: 120; eulerRotation.z: -150; brightness: 0.45 }
+            // Same light rig as the macOS app (SceneKit): soft ambient plus one lamp at (1, -1, 2) m,
+            // without distance falloff, on matte (Lambert) materials.
+            PointLight {
+                position: Qt.vector3d(1000, -1000, 2000)
+                brightness: scene.lamp
+                constantFade: 1; linearFade: 0; quadraticFade: 0
+                ambientColor: Qt.rgba(scene.ambient, scene.ambient, scene.ambient, 1)
+            }
             Repeater3D {
                 model: scene.parts
                 delegate: Model {
@@ -43,13 +49,11 @@ Item {
                     rotation: modelData.rotation
                     scale: modelData.scale
                     visible: modelData.visible
-                    materials: PrincipledMaterial {
-                        baseColor: modelData.color
-                        roughness: 0.62
-                        metalness: 0.08
+                    materials: DefaultMaterial {
+                        diffuseColor: modelData.color
+                        specularAmount: 0
                         opacity: modelData.opacity
-                        alphaMode: modelData.opacity < 1 ? PrincipledMaterial.Blend : PrincipledMaterial.Opaque
-                        lighting: modelData.unlit ? PrincipledMaterial.NoLighting : PrincipledMaterial.FragmentLighting
+                        lighting: modelData.unlit ? DefaultMaterial.NoLighting : DefaultMaterial.FragmentLighting
                         cullMode: Material.NoCulling
                     }
                 }
@@ -63,13 +67,11 @@ Item {
                     rotation: modelData.rotation
                     scale: modelData.scale
                     visible: modelData.visible
-                    materials: PrincipledMaterial {
-                        baseColor: modelData.color
-                        roughness: 0.62
-                        metalness: 0.08
+                    materials: DefaultMaterial {
+                        diffuseColor: modelData.color
+                        specularAmount: 0
                         opacity: modelData.opacity
-                        alphaMode: modelData.opacity < 1 ? PrincipledMaterial.Blend : PrincipledMaterial.Opaque
-                        lighting: modelData.unlit ? PrincipledMaterial.NoLighting : PrincipledMaterial.FragmentLighting
+                        lighting: modelData.unlit ? DefaultMaterial.NoLighting : DefaultMaterial.FragmentLighting
                         cullMode: Material.NoCulling
                     }
                 }

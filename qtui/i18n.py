@@ -89,6 +89,12 @@ def add(entries):
         _english.setdefault(key, value)
 
 
+def num(value, decimals=2):
+    """A number as SwiftUI shows interpolated values: decimal comma in Italian."""
+    text = '%.*f' % (decimals, float(value))
+    return text.replace('.', ',') if language() == 'it' else text
+
+
 def F(key, *args):
     """String(format: T(key), args…): translate a printf key, then fill its tokens in order."""
     text = T(key)

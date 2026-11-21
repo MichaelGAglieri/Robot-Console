@@ -6,10 +6,11 @@ from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (QDialog, QFileDialog, QGridLayout, QHBoxLayout, QLabel, QPlainTextEdit, QScrollArea, QSlider,
                                QSpinBox, QVBoxLayout, QWidget)
-from .i18n import F, T
+from .i18n import F, T, num
 from .model import parse_number, parse_int
-from .widgets import (Card, Disclosure, Segmented, button, caption, checkbox, clear_layout, combo, confirm, label, line, row,
-                      select_combo, set_combo_items, set_role, set_text_if_idle, well)
+from .widgets import (Card, Stepper, hline, preset_menu_button, Disclosure, Segmented, button, caption, checkbox, clear_layout, combo, confirm, label, line, row,
+                      select_combo, set_combo_items, set_role, set_text_if_idle, switch, well)
+from .widgets import switch as make_switch
 from . import theme
 
 GRIPS = [('apri', 'Apri'), ('chiudi', 'Chiudi'), ('non comandata', 'Mantieni')]
@@ -34,7 +35,7 @@ class ConnectionPanel(Card):
         self.collisions = checkbox('Blocca interferenze modello · Operatore')
         self.collisions.clicked.connect(self._collisions)
         self.collision_note = caption()
-        self.guidance = label('', 'accent')
+        self.guidance = label('', 'guidance')
         self.usb_note = caption()
         self.show_firmware = button('Mostra firmware da caricare', None, self._show_firmware)
         self.add(self.collisions, self.collision_note, self.guidance, self.usb_note, row(self.show_firmware, None))
@@ -190,7 +191,7 @@ class FirmwareEditorPanel(Card):
     def __init__(self, m, window):
         super().__init__('Firmware · parametri ed editor')
         self.m, self.window = m, window
-        self.summary = label('', 'mono')
+        self.summary = label('', 'monoaccent')
         self.status = caption()
         self.upgrade_note = label('Aggiorna i sorgenti per includere ENABLE e movimento simultaneo; poi compila e carica esplicitamente.', 'warning')
         self.upgrade = button('Aggiorna comandi giunti…', None, self.upgrade_axes)
@@ -230,6 +231,7 @@ class FirmwareEditorPanel(Card):
         font.setFamilies(['Menlo', 'Consolas', 'DejaVu Sans Mono', 'monospace'])
         font.setPointSize(11)
         self.editor.setFont(font)
+        self.group.add(hline())
         self.group.add(row(label('File'), self.file, button('Rileggi file', None, lambda: self.read(self.m.firmware_file)), None,
                            button('Salva sorgente', 'prominent', self.save)))
         self.group.add(self.editor)
@@ -341,8 +343,8 @@ class FirmwareEditorPanel(Card):
         if w.get('identity') != self.identity:
             self.identity = w.get('identity')
             self.load()
-        self.summary.setText('%s · ID %s · %s %.1f°/s' % (w['profile'].get('name', ''), w.get('identity', ''), T('massimo calcolato'), w.get('max_speed', 0)))
-        set_role(self.summary, 'mono')
+        self.summary.setText('%s · ID %s · %s %s°/s' % (w['profile'].get('name', ''), w.get('identity', ''), T('massimo calcolato'), num(w.get('max_speed', 0), 1)))
+        set_role(self.summary, 'monoaccent')
         self.status.setText(T(w.get('status', '')))
         outdated = w.get('axis_control_source') is not True or w.get('multi_axis_source') is not True
         self.upgrade_note.setVisible(outdated)
@@ -369,13 +371,13 @@ class LimitsPanel(Card):
         self.minima, self.maxima = [], []
         for i in range(6):
             lo, hi = line('Minimo', text='0'), line('Massimo', text='0')
-            menu = combo([(None, 'Predefinito')] + [(span, 'Blocca a 0°' if span == 0 else '±%d°' % span) for span in LIMIT_PRESETS])
-            menu.activated.connect(lambda _x, axis=i, w=menu: (w.currentData() is not None and self.set_preset(w.currentData(), axis), w.setCurrentIndex(0)))
+            menu = preset_menu_button('Predefinito', [(span, 'Blocca a 0°' if span == 0 else '±%d°' % span) for span in LIMIT_PRESETS],
+                                      lambda span, axis=i: self.set_preset(span, axis))
             box = QVBoxLayout()
             box.addWidget(label('J%d' % (i + 1), 'section'))
             box.addWidget(lo)
             box.addWidget(hi)
-            box.addWidget(menu)
+            box.addWidget(menu, 0, Qt.AlignLeft)
             grid.addWidget(well(box), i // 3, i % 3)
             self.minima.append(lo)
             self.maxima.append(hi)
@@ -557,7 +559,7 @@ class JointCard(QWidget):
         supported = s.get('mode') == 'demo' or s.get('axis_control') is True
         self.enabled.setChecked(enabled)
         self.enabled.setEnabled(not ((not m.idle and not enabled) or (s.get('connected') and not supported)))
-        self.value.setText('%.2f°' % s['pos'][axis])
+        self.value.setText(num(s['pos'][axis]) + '°')
         self.jog_row.setVisible(not m.multi_mode)
         self.multi_row.setVisible(m.multi_mode)
         self.multi_row.setEnabled(m.idle and enabled and (s.get('axes_available') or [True] * 6)[axis] is not False)
@@ -565,7 +567,7 @@ class JointCard(QWidget):
         show_peak = m.multi_mode and plan.get('valid') and axis < len(plan.get('peaks', []))
         self.peak.setVisible(bool(show_peak))
         if show_peak:
-            self.peak.setText(T('Picco previsto: ') + '%.2f°/s' % plan['peaks'][axis])
+            self.peak.setText(T('Picco previsto: ') + num(plan['peaks'][axis]) + '°/s')
         self.minus.setEnabled(m.can_jog(axis, -1))
         self.plus.setEnabled(m.can_jog(axis, 1))
         self.speed_label.setText(T('Velocità massima' if m.multi_mode else 'Velocità'))
@@ -594,19 +596,19 @@ class MotionPanel(Card):
     def __init__(self, m, window):
         super().__init__('Muovi e osserva')
         self.m, self.window = m, window
-        self.speed_value = label('5.0°/s', 'accent')
+        self.speed_value = label(num(5, 1) + '°/s', 'accent')
         self.common = QSlider(Qt.Horizontal)
         self.common.setRange(2, 40)
         self.common.setValue(10)
-        self.common.valueChanged.connect(lambda v: self.speed_value.setText('%.1f°/s' % (v / 2)))
+        self.common.valueChanged.connect(lambda v: self.speed_value.setText(num(v / 2, 1) + '°/s'))
         self.max_label = caption('20°/s')
         self.apply_all = button('Applica a tutti', None, lambda: m.send('set_speed', dict(speed=self.common.value() / 2)))
-        self.add(row(label('Velocità comune', 'section'), None, self.speed_value))
+        self.add(row(label('Velocità comune', 'subhead'), None, self.speed_value))
         self.add(row(caption('1°/s'), self.common, self.max_label))
         self.add(row(self.apply_all, caption('Stesse velocità per comandi singoli, simultanei e pose'), None))
         self.mode = Segmented([(False, 'Singolo'), (True, 'Simultaneo')])
         self.mode.changed.connect(self._mode)
-        self.add(self.mode)
+        self.add(hline(), row(label('Comando dei giunti', wrap=False), self.mode, None))
         # Single-joint step controls.
         self.single = QWidget()
         sl = QVBoxLayout(self.single)
@@ -617,11 +619,10 @@ class MotionPanel(Card):
         self.step_value = label('1.00°', 'accent')
         self.step_text = line('Gradi', 75, '1')
         self.step_text.returnPressed.connect(self.apply_step)
-        self.stepper = QSpinBox()
-        self.stepper.setRange(1, 360)
+        self.stepper = Stepper(1, 360, 1)
         self.stepper.valueChanged.connect(lambda v: self.select_step(v) if v != int(m.step) else None)
-        sl.addLayout(row(label('Spostamento per clic', 'section'), self.keyboard, self.step_value, None, self.step_text, label('°'),
-                         button('Imposta angolo', None, self.apply_step), self.stepper))
+        sl.addLayout(row(label('Spostamento per clic', 'subhead'), caption('Tastiera'), self.keyboard, self.step_value, None, self.step_text,
+                         label('°'), button('Imposta angolo', None, self.apply_step), label('±1°'), self.stepper))
         self.step_slider = QSlider(Qt.Horizontal)
         self.step_slider.setRange(1, 360)
         self.step_slider.valueChanged.connect(lambda v: self.select_step(v) if self.step_slider.isSliderDown() else None)
@@ -632,7 +633,8 @@ class MotionPanel(Card):
         for i, amount in enumerate(STEP_PRESETS):
             b = button('%d°' % amount, 'compact', lambda _c=False, a=amount: self.select_step(a))
             b.setCheckable(True)
-            presets.addWidget(b, i // 8 if window.width() < 1300 else 0, i % 8 if window.width() < 1300 else i)
+            b.setMinimumWidth(36)
+            presets.addWidget(b, 0, i)  # one row, like the macOS app
             self.preset_buttons[amount] = b
         sl.addLayout(presets)
         self.add(self.single)
@@ -745,7 +747,7 @@ class MotionPanel(Card):
         self.mode.set_value(m.multi_mode)
         self.mode.setEnabled(m.idle)
         self.single.setVisible(not m.multi_mode)
-        self.step_value.setText('%.2f°' % m.step)
+        self.step_value.setText(num(m.step) + '°')
         for amount, b in self.preset_buttons.items():
             b.setChecked(m.step == amount)
         self.stepper.blockSignals(True)
@@ -797,7 +799,7 @@ class PoseEditor(QDialog):
         self.setMinimumWidth(680)
         layout = QVBoxLayout(self)
         layout.setSpacing(14)
-        self.enabled = checkbox('Abilitata')
+        self.enabled = switch('Abilitata')
         self.enabled.setChecked(pose.get('enabled', True) is not False)
         layout.addLayout(row(label('Modifica posa', 'headline'), None, self.enabled))
         self.name = line('Nome posa', text=pose.get('name', ''))
@@ -1014,7 +1016,7 @@ class SequencePanel(Card):
             enabled = pose.get('enabled', True) is not False
             box = QVBoxLayout()
             box.setSpacing(6)
-            switch = checkbox('')
+            switch = make_switch()
             switch.setChecked(enabled)
             switch.setToolTip(F('Abilita posa %lld', i + 1))
             switch.clicked.connect(lambda v, i=i: m.send('pose_enable', dict(index=i, enabled=v, revision=revision)))

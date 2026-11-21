@@ -3,7 +3,7 @@
 """Assistant: local chat over the robot state and diary, optional offline LLM through Ollama."""
 import sys
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QScrollArea, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QScrollArea, QSizePolicy, QVBoxLayout, QWidget
 from .i18n import T
 from .speech import Dictation, Speaker, spoken_text
 from .widgets import Card, Disclosure, button, caption, checkbox, clear_layout, combo, label, line, row, set_combo_items, well
@@ -26,7 +26,8 @@ class CompanionPanel(Card):
         self.add(caption('Chat e voce consultano lo stato e il diario. Per muovere il robot usa i controlli manuali.'))
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
-        self.scroll.setFixedHeight(240)
+        self.scroll.setFixedHeight(220)
+        self.scroll.setObjectName('Transparent')
         holder = QWidget()
         self.messages = QVBoxLayout(holder)
         self.messages.setSpacing(12)
@@ -38,7 +39,7 @@ class CompanionPanel(Card):
         self.draft = line('Scrivi una domanda o Ricorda: …')
         self.draft.returnPressed.connect(self.ask)
         self.draft.textChanged.connect(lambda _t: self.refresh())
-        self.send_button = button('Invia', 'prominent', self.ask)
+        self.send_button = button('Invia', None, self.ask)
         self.dictation = Dictation(self)
         self.dictation.heard.connect(self.draft.setText)
         self.dictation.notice.connect(lambda t: self.voice_note.setText(T(t)))
@@ -64,7 +65,8 @@ class CompanionPanel(Card):
         self.models = combo([('', 'Scegli un modello')], lambda v: v and m.send('ollama_select', dict(model=v)))
         self.load = button('Avvia e carica modello', None, lambda: m.send('ollama_start'))
         self.models_row = QWidget()
-        self.models_row.setLayout(row(label('Modello locale'), self.models, self.load, None))
+        self.models.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.models_row.setLayout(row(label('Modello locale'), self.models, self.load))
         box.addWidget(self.models_row)
         self.start_button = button('Avvia Ollama e cerca modelli', None, lambda: m.send('ollama_start'))
         box.addLayout(row(self.start_button, None))

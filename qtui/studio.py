@@ -9,7 +9,7 @@ from .i18n import F, T
 from .model import parse_int, parse_number
 from .viewport3d import ArmView
 from .widgets import (Card, Disclosure, Segmented, button, caption, checkbox, clear_layout, combo, confirm, label, line, row,
-                      select_combo, set_combo_items, set_role, well)
+                      select_combo, set_combo_items, set_role, switch, well)
 from . import theme
 
 VIEWS = [('perspective', '3D'), ('front', 'Fronte'), ('side', 'Lato'), ('top', 'Alto')]
@@ -104,11 +104,11 @@ class ArmPanel(QFrame):
     def __init__(self, m, window, compact=False):
         super().__init__()
         self.m, self.window = m, window
-        self.setObjectName('Well')
+        self.setObjectName('WellPlain')  # same surface as the card, as on macOS
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(8)
-        self.follow = checkbox('Segui comandi')
+        self.follow = switch('Segui comandi')
         self.follow.clicked.connect(lambda v: m.send('studio_follow', dict(enabled=v)))
         layout.addLayout(row(label('Anteprima 3D', 'headline', wrap=False), None, self.follow))
         self.home_button = button('HOME del modello…', None, lambda: ModelHomeEditor(m, window).exec())
@@ -133,9 +133,9 @@ class ArmPanel(QFrame):
         self.trace.setLayout(row(label('Traccia arancione · MoveJ', 'accent'), None, self.trace_time, self.trace_play, self.trace_stop))
         layout.addWidget(self.trace)
         layout.addWidget(caption('Trascina: ruota · Maiusc + trascina: sposta · rotella o pizzico: zoom', small=True))
-        self.views = Segmented(VIEWS)
+        self.views = Segmented(VIEWS, segment_width=56)
         self.views.changed.connect(self.view.set_preset)
-        layout.addWidget(self.views)
+        layout.addLayout(row(label('Vista', wrap=False), self.views, None))
         self.follow_note = caption(small=True)
         self.tcp = label('', 'mono')
         self.collisions = label('', 'stop')
@@ -803,7 +803,7 @@ class CartesianPanel(Card):
         self.frame = combo([('base', 'Base robot'), ('tool', 'Utensile')])
         self.frame.activated.connect(lambda _i: self.refresh())
         self.add(row(label('Riferimento'), self.frame, None))
-        self.readout = label('', 'mono')
+        self.readout = label('', 'monostrong')
         self.axis = label('', 'mono')
         self.add(row(self.readout, None, caption('Asse pinza'), self.axis))
         self.tool_note = caption('Lettura nella base robot; il jog nell’utensile segue gli assi della pinza.')
@@ -962,7 +962,7 @@ class MoveJPreviewPanel(Card):
         self.source = Segmented([('joints', 'Angoli assoluti'), ('studio', 'Giunti Studio'), ('pose', 'Posa salvata'),
                                  ('program', 'Programma'), ('movel', 'Retta MoveL')])
         self.source.changed.connect(lambda _v: (self.discard(), self.refresh()))
-        self.add(self.source)
+        self.add(row(label('Sorgente MoveJ', wrap=False), self.source, None))
         # Absolute angles.
         self.joints_box = QWidget()
         grid = QGridLayout()
@@ -1273,7 +1273,7 @@ class ProgramPanel(Card):
         self.fraction.setRange(0, 100)
         self.fraction_label = label('0%', 'mono')
         self.fraction.valueChanged.connect(self._fraction)
-        self.pose_preview.setLayout(row(label('Anteprima pose'), self.preview_pose, self.fraction, self.fraction_label))
+        self.pose_preview.setLayout(column_layout(_rule(), row(label('Anteprima pose'), self.preview_pose, self.fraction, self.fraction_label)))
         self.add(self.pose_preview)
         self.list_key = None
 

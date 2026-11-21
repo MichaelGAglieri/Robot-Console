@@ -3,6 +3,7 @@
 ## 2.1.0 — Robot Console su macOS, Linux e Windows
 
 - Su macOS l’app principale resta quella SwiftUI; su Linux e Windows c’è la nuova app Qt, modellata su quella macOS.
+- App Qt rifinita confrontandola schermata per schermata con l’app macOS: icone e intestazione, aree di lavoro a segmenti uguali, barre laterali da 220 punti con divisori sottili, pannelli ridimensionabili in altezza con «Adatta», interruttori, menu a tendina con frecce, separatori, decimali con la virgola in italiano, stessa luce e stessa vista 3D (direzione (1, −1, 0.65)).
 
 - Nuova app desktop Qt (PySide6) per Linux e Windows con le stesse aree dell’app macOS: Operatore, Studio 3D e programmi, Diagnostica e ROS 2, Assistente. Usa lo stesso controllo (`native/native_bridge.py`); chiudere la finestra invia STOP.
 - Vista 3D in Qt Quick 3D: braccio, fantasma della posa reale, traccia MoveJ, TCP, riferimenti di lavoro, target e ostacoli.

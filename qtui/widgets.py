@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (c) 2026 Michael Giuseppe Aglieri
 """Small building blocks: cards, captions, buttons, disclosure groups, segmented controls."""
-from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QRectF, QSettings, QSize, Qt, Signal
 from PySide6.QtGui import QPainter, QColor, QPen
 from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QLayout,
-                               QLineEdit, QMessageBox, QPushButton, QSizePolicy, QVBoxLayout, QWidget)
+                               QLineEdit, QMessageBox, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
 from .i18n import T
 from . import theme
 
@@ -30,8 +30,37 @@ def set_role(widget, role):
         widget.style().polish(widget)
 
 
-def button(text, kind=None, slot=None, tip=None):
-    widget = QPushButton(T(text))
+def tinted(widget, name, tint, size=14):
+    """Give a label or button a line icon that follows light/dark changes (see retint)."""
+    widget.tint = (name, tint, size)
+    if isinstance(widget, QLabel):
+        widget.setPixmap(theme.icon(name, tint, size).pixmap(size, size))
+    else:
+        widget.setIcon(theme.icon(name, tint, size))
+        widget.setIconSize(QSize(size, size))
+    return widget
+
+
+def retint(root):
+    """Re-render tinted icons after the appearance changed."""
+    for widget in [root] + root.findChildren(QWidget):
+        if getattr(widget, 'tint', None):
+            tinted(widget, *widget.tint)
+        elif isinstance(widget, Disclosure):
+            widget.paint_chevron()
+
+
+def icon_label(name, tint='accent', size=14):
+    widget = QLabel()
+    widget.setFixedSize(size + 2, size + 2)
+    widget.setAlignment(Qt.AlignCenter)
+    return tinted(widget, name, tint, size)
+
+
+def button(text, kind=None, slot=None, tip=None, icon=None, tint=None):
+    widget = QPushButton((' ' if icon else '') + T(text))  # a little air between icon and text
+    if icon:
+        tinted(widget, icon, tint or ('header_text' if kind == 'header' else 'white' if kind == 'danger' else 'text'), 14)
     if kind:
         widget.setProperty('kind', kind)
     if slot:
@@ -44,6 +73,50 @@ def button(text, kind=None, slot=None, tip=None):
 
 def checkbox(text, slot=None):
     widget = QCheckBox(T(text))
+    if slot:
+        widget.toggled.connect(slot)
+    return widget
+
+
+class ToggleSwitch(QCheckBox):
+    """macOS-style switch, used where the macOS app shows one (.toggleStyle(.switch))."""
+    TRACK = QSize(30, 18)
+
+    def sizeHint(self):
+        text = self.text()
+        width = self.TRACK.width() + (8 + self.fontMetrics().horizontalAdvance(text) if text else 0)
+        return QSize(width + 2, max(self.TRACK.height() + 2, self.fontMetrics().height() + 4))
+
+    minimumSizeHint = sizeHint
+
+    def hitButton(self, pos):
+        return self.rect().contains(pos)
+
+    def paintEvent(self, _event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        track = QRectF(1, (self.height() - self.TRACK.height()) / 2, self.TRACK.width(), self.TRACK.height())
+        on = self.isChecked()
+        fill = theme.color('accent' if not theme.is_dark() else 'lime') if on else QColor(theme.color('border'))
+        if not self.isEnabled():
+            fill.setAlphaF(.45)
+        p.setPen(Qt.NoPen)
+        p.setBrush(fill)
+        p.drawRoundedRect(track, track.height() / 2, track.height() / 2)
+        knob = track.height() - 4
+        x = track.right() - knob - 2 if on else track.left() + 2
+        p.setBrush(QColor(0, 0, 0, 40))
+        p.drawEllipse(QRectF(x, track.top() + 2.6, knob, knob))
+        p.setBrush(QColor('#FFFFFF'))
+        p.drawEllipse(QRectF(x, track.top() + 2, knob, knob))
+        if self.text():
+            p.setPen(theme.color('text' if self.isEnabled() else 'secondary'))
+            p.drawText(QRectF(track.right() + 8, 0, self.width() - track.right() - 8, self.height()), Qt.AlignVCenter | Qt.AlignLeft, self.text())
+
+
+def switch(text='', slot=None):
+    widget = ToggleSwitch(T(text) if text else '')
+    widget.setCursor(Qt.PointingHandCursor)
     if slot:
         widget.toggled.connect(slot)
     return widget
@@ -135,6 +208,14 @@ def well(layout=None, name='Well', margins=12):
     return frame
 
 
+def hline():
+    """Thin divider (SwiftUI Divider)."""
+    rule = QFrame()
+    rule.setObjectName('CardRule')
+    rule.setFixedHeight(1)
+    return rule
+
+
 def clear_layout(layout):
     while layout.count():
         item = layout.takeAt(0)
@@ -144,41 +225,164 @@ def clear_layout(layout):
             clear_layout(item.layout())
 
 
-class Card(QFrame):
-    """Panel with an uppercase technical title, like the macOS app."""
+class _FitScroll(QScrollArea):
+    """Shows the whole content, or at most `limit` points with a scroll bar (resized panels)."""
 
-    def __init__(self, title, parent=None):
+    def __init__(self, content):
+        super().__init__()
+        self.setObjectName('CardBody')
+        self.limit = None
+        self.setWidgetResizable(True)
+        self.setFrameShape(QFrame.NoFrame)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        self.setWidget(content)
+        content.installEventFilter(self)
+
+    def natural(self):
+        content = self.widget()
+        width = self.viewport().width() or content.width()
+        if content.hasHeightForWidth() and width > 0:
+            return content.heightForWidth(width)
+        return content.sizeHint().height()
+
+    def sizeHint(self):
+        height = self.natural()
+        if self.limit:
+            height = min(self.limit, height)
+        return QSize(super().sizeHint().width(), max(1, height))
+
+    def minimumSizeHint(self):
+        return QSize(0, self.sizeHint().height())
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.LayoutRequest:
+            self.updateGeometry()
+        return False
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if event.oldSize().width() != event.size().width():
+            self.updateGeometry()
+
+
+class _Grip(QWidget):
+    """Capsule at the bottom of a panel: drag to change only its height, double click to fit."""
+
+    def __init__(self, card):
+        super().__init__()
+        self.card = card
+        self.hover = False
+        self.start = None
+        self.setFixedHeight(16)
+        self.setCursor(Qt.SizeVerCursor)
+        self.setToolTip(T('Trascina per cambiare solo l’altezza. Doppio clic per adattare al contenuto.'))
+
+    def enterEvent(self, _e):
+        self.hover = True
+        self.update()
+
+    def leaveEvent(self, _e):
+        self.hover = False
+        self.update()
+
+    def mousePressEvent(self, e):
+        self.start = (e.globalPosition().y(), self.card.scroll.height())
+
+    def mouseMoveEvent(self, e):
+        if self.start:
+            y, height = self.start
+            self.card.set_limit(height + e.globalPosition().y() - y)
+
+    def mouseReleaseEvent(self, _e):
+        self.start = None
+
+    def mouseDoubleClickEvent(self, _e):
+        self.card.set_limit(None)
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        color = theme.color('accent') if self.hover else theme.color('border')
+        if self.hover:
+            color.setAlphaF(.7)
+        p.setPen(Qt.NoPen)
+        p.setBrush(color)
+        p.drawRoundedRect(QRectF(self.width() / 2 - 18, self.height() / 2 - 2, 36, 4), 2, 2)
+
+
+class Card(QFrame):
+    """Panel with an uppercase technical title, like the macOS app.
+
+    Resizable panels end with a grip that limits only their height (saved per panel);
+    the content then scrolls inside the card. "Adatta" restores the natural height.
+    """
+
+    def __init__(self, title, parent=None, resizable=True):
         super().__init__(parent)
         self.setObjectName('Card')
+        self.key = 'panelHeight/' + title
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setContentsMargins(0, 0, 0, 0 if resizable else 18)
         outer.setSpacing(0)
         head = QHBoxLayout()
-        head.setContentsMargins(18, 14, 18, 12)
+        head.setContentsMargins(20, 15, 20, 10)
+        head.setSpacing(0)
         bar = QFrame()
         bar.setObjectName('CardBar')
         bar.setFixedSize(3, 14)
         self.title = QLabel(T(title).upper())
         self.title.setObjectName('CardTitle')
         head.addWidget(bar)
-        head.addSpacing(8)
+        head.addSpacing(9)
         head.addWidget(self.title)
         head.addStretch(1)
+        self.fit = QPushButton(T('Adatta'))
+        self.fit.setObjectName('CardFit')
+        self.fit.setCursor(Qt.PointingHandCursor)
+        self.fit.setToolTip(T('Ripristina l’altezza naturale del contenuto'))
+        self.fit.clicked.connect(lambda: self.set_limit(None))
+        self.fit.hide()
+        head.addWidget(self.fit)
         self.head = head
         outer.addLayout(head)
         rule = QFrame()
         rule.setObjectName('CardRule')
         rule.setFixedHeight(1)
         outer.addWidget(rule)
-        self.body = QVBoxLayout()
-        self.body.setContentsMargins(18, 14, 18, 18)
-        self.body.setSpacing(10)
-        outer.addLayout(self.body)
+        content = QWidget()
+        self.body = QVBoxLayout(content)
+        self.body.setContentsMargins(20, 14, 20, 2)
+        self.body.setSpacing(14)
+        self.scroll = _FitScroll(content)
+        outer.addWidget(self.scroll)
+        self.resizable = resizable
+        if resizable:
+            outer.addSpacing(4)
+            outer.addWidget(_Grip(self))
+            outer.addSpacing(4)
+            stored = QSettings().value(self.key, 0, float) if QSettings().contains(self.key) else 0
+            if stored:
+                self.set_limit(stored, save=False)
+
+    def set_limit(self, height, save=True):
+        height = None if not height else min(1600, max(28, int(height)))
+        self.scroll.limit = height
+        self.fit.setVisible(height is not None)
+        self.scroll.updateGeometry()
+        if save:
+            settings = QSettings()
+            if height:
+                settings.setValue(self.key, height)
+            else:
+                settings.remove(self.key)
 
     def add(self, *items):
         for item in items:
             if isinstance(item, QLayout):
                 self.body.addLayout(item)
+            elif isinstance(item, Segmented):
+                self.body.addWidget(item, 0, Qt.AlignLeft)
             elif item is not None:
                 self.body.addWidget(item)
         return self
@@ -211,42 +415,64 @@ class Disclosure(QWidget):
         if value == self.expanded:
             return
         self.expanded = value
-        self.header.setText(('▾  ' if value else '▸  ') + self.title)
+        self.header.setText('  ' + self.title)
+        self.paint_chevron()
         self.content.setVisible(value)
         self.toggled.emit(value)
+
+    def paint_chevron(self):
+        self.header.setIcon(theme.icon('chevron-down' if self.expanded else 'chevron-right', 'text', 12))
+        self.header.setIconSize(QSize(11, 11))
 
     def add(self, *items):
         for item in items:
             if isinstance(item, QLayout):
                 self.body.addLayout(item)
+            elif isinstance(item, Segmented):
+                self.body.addWidget(item, 0, Qt.AlignLeft)
             elif item is not None:
                 self.body.addWidget(item)
         return self
 
 
 class Segmented(QFrame):
-    """Mutually exclusive buttons; emits the selected value."""
+    """Mutually exclusive buttons (segmented picker); emits the selected value.
+
+    segment_width gives every segment the same width, like the macOS segmented control.
+    """
     changed = Signal(object)
 
-    def __init__(self, items, current=None, parent=None):
+    def __init__(self, items, current=None, parent=None, segment_width=None):
         super().__init__(parent)
         self.setObjectName('Segments')
         layout = QHBoxLayout(self)
         layout.setContentsMargins(2, 2, 2, 2)
-        layout.setSpacing(2)
+        layout.setSpacing(0)
         self.group = QButtonGroup(self)
         self.buttons = {}
-        for value, text in items:
+        self.separators = []
+        for index, (value, text) in enumerate(items):
+            if index:
+                sep = QFrame()
+                sep.setObjectName('SegmentSeparator')
+                sep.setFixedSize(1, 14)
+                layout.addWidget(sep, 0, Qt.AlignVCenter)
+                self.separators.append(sep)
             b = QPushButton(T(text))
             b.setProperty('kind', 'segment')
             b.setCheckable(True)
             b.setCursor(Qt.PointingHandCursor)
+            if segment_width:
+                b.setMinimumWidth(segment_width)
             b.clicked.connect(lambda _c=False, v=value: self._clicked(v))
             self.group.addButton(b)
             self.buttons[value] = b
             layout.addWidget(b)
+        self.order = [v for v, _ in items]
+        self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)  # never stretched, like macOS
         self.value = None
         self.set_value(current if current is not None else items[0][0])
+        self.setMaximumWidth(self.sizeHint().width())
 
     def _clicked(self, value):
         if value != self.value:
@@ -257,6 +483,57 @@ class Segmented(QFrame):
         self.value = value
         if value in self.buttons:
             self.buttons[value].setChecked(True)
+        selected = self.order.index(value) if value in self.order else -1
+        for index, sep in enumerate(self.separators):  # separator between segment index and index+1
+            sep.setVisible(selected not in (index, index + 1))
+
+
+class Stepper(QWidget):
+    """macOS Stepper: two small arrows that change an integer value by one."""
+    valueChanged = Signal(int)
+
+    def __init__(self, minimum, maximum, value=None, parent=None):
+        super().__init__(parent)
+        self.minimum, self.maximum = minimum, maximum
+        self._value = minimum if value is None else value
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        self.buttons = []
+        for name, delta in (('chevron-up', 1), ('chevron-down', -1)):
+            b = QPushButton()
+            b.setProperty('kind', 'stepper')
+            b.setFixedSize(18, 12)
+            b.setCursor(Qt.PointingHandCursor)
+            b.setAutoRepeat(True)
+            tinted(b, name, 'text', 9)
+            b.clicked.connect(lambda _c=False, d=delta: self.setValue(self._value + d, emit=True))
+            layout.addWidget(b)
+            self.buttons.append(b)
+
+    def value(self):
+        return self._value
+
+    def setValue(self, value, emit=False):
+        value = max(self.minimum, min(self.maximum, int(value)))
+        if value != self._value:
+            self._value = value
+            if emit and not self.signalsBlocked():
+                self.valueChanged.emit(value)
+
+
+def preset_menu_button(text, items, slot):
+    """Menu button (SwiftUI Menu): a plain button that opens a list of choices."""
+    from PySide6.QtWidgets import QMenu
+    widget = button(text)
+    widget.setProperty('kind', 'menu')
+    menu = QMenu(widget)
+    for value, caption_text in items:
+        action = menu.addAction(T(caption_text))
+        action.triggered.connect(lambda _c=False, v=value: slot(v))
+    widget.setMenu(menu)
+    widget.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+    return widget
 
 
 class StatusChip(QWidget):
