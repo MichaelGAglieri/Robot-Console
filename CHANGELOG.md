@@ -2,14 +2,17 @@
 
 ## 2.1.0 — Robot Console su macOS, Linux e Windows
 
-- Nuova app desktop Qt (PySide6) con le stesse aree dell’app macOS: Operatore, Studio 3D e programmi, Diagnostica e ROS 2, Assistente. Usa lo stesso controllo (`native/native_bridge.py`); chiudere la finestra invia STOP.
+- Su macOS l’app principale resta quella SwiftUI; su Linux e Windows c’è la nuova app Qt, modellata su quella macOS.
+
+- Nuova app desktop Qt (PySide6) per Linux e Windows con le stesse aree dell’app macOS: Operatore, Studio 3D e programmi, Diagnostica e ROS 2, Assistente. Usa lo stesso controllo (`native/native_bridge.py`); chiudere la finestra invia STOP.
 - Vista 3D in Qt Quick 3D: braccio, fantasma della posa reale, traccia MoveJ, TCP, riferimenti di lavoro, target e ostacoli.
 - Livello piattaforma: porte seriali macOS/Linux (termios) e Windows (pyserial), cartelle dati per sistema, ricerca di Arduino CLI, Ollama, Pixi e Webots, blocco di istanza portabile.
 - Modello DOC: geometria EB-15/EBG-30 ricostruita per il D.O.C.; nel repository un modello schematico GPL, il modello dettagliato si genera in locale dagli STL originali ToolBox (CC BY-NC-ND) con «Importa pezzi EB-15…». Collisioni con capsule fisse indipendenti dal modello mostrato.
 - Voce: sintesi Qt; dettatura offline facoltativa con Vosk, altrimenti comando scritto con la stessa conferma.
 - Avvio con `run.sh` / `run.bat`, opzioni `--no-hardware` e `--data`; regola udev e lanciatore per Linux.
 - CI su Ubuntu, Windows e macOS; test end-to-end della finestra Qt in anteprima.
-- Pacchetti senza Python da installare: `.deb` per Linux, installer `.exe` e `.zip` per Windows, `.dmg` per macOS con firma ad-hoc (`scripts/build_desktop.py`, workflow «Desktop packages»).
+- Pacchetti: `.deb` per Linux, installer `.exe` e `.zip` per Windows (Python e Qt inclusi), `.dmg` per macOS con l’app SwiftUI e firma ad-hoc (`scripts/build_desktop.py`, workflow «Desktop packages»).
+- L’app SwiftUI include ora ogni modulo del controllo (`native/build.command` non usa più un elenco fisso) e la CI verifica che il controllo impacchettato risponda, anche con il Python 3.9 di macOS.
 - Rimossi percorsi personali dalla documentazione e il vecchio modello illustrativo UR3e.
 
 ## 2.0.1 · build47 — ordine dei giunti nelle sequenze

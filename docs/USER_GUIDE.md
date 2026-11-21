@@ -30,7 +30,7 @@ Le procedure seguenti descrivono il comportamento della build45. `docs/CAMPI_E_S
 
 ## 02 · Primo avvio e prova senza hardware
 
-Avvia **Robot Console** con `run.sh` (macOS e Linux) o `run.bat` (Windows): al primo avvio crea l’ambiente Python `.venv` con PySide6. Su macOS puoi usare anche l’app SwiftUI dalla cartella Applicazioni. L’avvio non connette automaticamente la Mega e non carica firmware. Ollama, ROS 2 e Arduino CLI servono solo alle rispettive funzioni. Con `--no-hardware` la porta USB non viene mai aperta; con `--data CARTELLA` usi una cartella dati separata.
+Su macOS apri **Robot Console** dalla cartella Applicazioni (app SwiftUI). Su Linux e Windows usa il pacchetto installato oppure, dal sorgente, `run.sh` (Linux) o `run.bat` (Windows): al primo avvio crea l’ambiente Python `.venv` con PySide6. L’avvio non connette automaticamente la Mega e non carica firmware. Ollama, ROS 2 e Arduino CLI servono solo alle rispettive funzioni. Con `--no-hardware` la porta USB non viene mai aperta; con `--data CARTELLA` usi una cartella dati separata.
 
 Per imparare l’interfaccia senza muovere il robot:
 
@@ -326,7 +326,7 @@ Se la compilazione fallisce, correggi il primo errore significativo nel log. Se 
 
 ## 21 · Comandi vocali del robot e conferma
 
-Questa funzione si trova in **Muovi e osserva → Comandi vocali del robot** ed è distinta dalla dettatura della chat IA. Nell’app macOS usa il riconoscimento vocale locale Apple. Nell’app Qt (macOS, Linux, Windows) puoi scrivere il comando nel campo, oppure dettarlo offline con Vosk: installa `vosk` e `sounddevice` (`requirements-optional.txt`) e copia un modello Vosk della lingua (per esempio vosk-model-small-it) nella cartella dati sotto `speech/it` o `speech/en`. Nessun audio lascia il computer. Anche scritta, la conferma resta «sì, confermo» e scade dopo 30 secondi. Ollama non interpreta questi comandi motore.
+Questa funzione si trova in **Muovi e osserva → Comandi vocali del robot** ed è distinta dalla dettatura della chat IA. Nell’app macOS usa il riconoscimento vocale locale Apple. Nell’app Qt (Linux, Windows) puoi scrivere il comando nel campo, oppure dettarlo offline con Vosk: installa `vosk` e `sounddevice` (`requirements-optional.txt`) e copia un modello Vosk della lingua (per esempio vosk-model-small-it) nella cartella dati sotto `speech/it` o `speech/en`. Nessun audio lascia il computer. Anche scritta, la conferma resta «sì, confermo» e scade dopo 30 secondi. Ollama non interpreta questi comandi motore.
 
 Premi **Parla al robot**, poi pronuncia una frase chiara. «Muovi J2 di 5 gradi» indica uno spostamento relativo. «Muovi J2 a 5 gradi» indica una destinazione assoluta. «Muovi J1 a 5 gradi, J2 a 3 e J3 a meno 2» prepara un gruppo. «Avvia posa 1» richiama la prima posa con il percorso insegnato, pinza e pausa e resta sulla posa.
 

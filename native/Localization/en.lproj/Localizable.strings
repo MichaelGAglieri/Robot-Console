@@ -479,6 +479,7 @@
 "Il sorgente salvato non include ancora il controllo ENABLE per giunto." = "The saved source does not yet include per-joint ENABLE control.";
 "Il target cartesiano richiede X, Y e Z." = "The Cartesian target needs X, Y and Z.";
 "Importa URDF…" = "Import URDF…";
+"Importa pezzi EB-15…" = "Import EB-15 parts…";
 "Imposta angolo" = "Set angle";
 "Imposta lo spostamento nelle schede J1–J6 e regola la velocità con gli stessi controlli del movimento singolo. Zero lascia fermo il giunto." = "Set displacement in the J1–J6 cards and adjust speed using the same controls as single-joint motion. Zero keeps a joint still.";
 "Imposta riferimento HOME…" = "Set HOME reference…";
@@ -733,6 +734,7 @@
 "Per abilitare 20°/s sul robot, carica il firmware incluso dalla sezione Firmware. Quello attuale resta utilizzabile fino a 10°/s." = "Upload the included firmware from the Firmware section to enable 20°/s on the robot. The current version remains usable up to 10°/s.";
 "Per gestire ENABLE serve il nuovo firmware: scollega, aggiorna i comandi giunti, compila e carica il profilo. Nessuna corrente disattivata." = "ENABLE control requires updated firmware: disconnect, update joint commands, compile and upload the profile. No current has been disabled.";
 "Per gestire ENABLE serve il nuovo firmware: scollega, ripristina i sorgenti inclusi, genera e carica il profilo. Nessuna corrente disattivata." = "ENABLE control requires updated firmware: disconnect, update joint commands, compile and upload the profile. No current has been disabled.";
+"Per il modello dettagliato importa gli STL originali EB-15 ed EBG-30 di ToolBox Robotics (licenza CC BY-NC-ND): restano solo su questo computer." = "For the detailed model import the original ToolBox Robotics EB-15 and EBG-30 STL files (CC BY-NC-ND licence): they stay on this computer only.";
 "Per l’IK scegli la base o un riferimento di lavoro." = "For IK choose the base or a work frame.";
 "Per partire e arrivare insieme, ogni giunto rispetta il proprio massimo e può rallentare. Il picco previsto considera anche l’accelerazione." = "To start and finish together, each joint stays below its own maximum and may slow down. The estimated peak also accounts for acceleration.";
 "Per sequenze, pose e HOME dell’Operatore il controllo collisioni del modello 3D non bloccherà i movimenti. Verifica visivamente il percorso reale. Limiti, velocità, comunicazione e STOP restano attivi. MoveJ/MoveL nello Studio mantengono i controlli. La scelta si azzera alla prossima connessione." = "For Operator sequences, poses and HOME, 3D model collisions will not block movement. Visually check the physical path. Limits, speed, communication checks and STOP remain active. Studio MoveJ/MoveL checks remain enabled. This choice resets on the next connection.";
@@ -935,6 +937,7 @@
 "Scegli" = "Choose";
 "Scegli cartella…" = "Choose folder…";
 "Scegli funzione" = "Choose function";
+"Scegli gli STL o gli ZIP scaricati da Thingiverse (EB-15 e EBG-30)" = "Choose the STL files or ZIP archives downloaded from Thingiverse (EB-15 and EBG-30)";
 "Scegli il target dell’istruzione." = "Choose the instruction's target.";
 "Scegli o modifica gli intervalli, poi premi Applica limiti. I predefiniti non sono finecorsa meccanici. Gli ultimi limiti restano separati per Anteprima e Robot USB." = "Choose or edit ranges, then click Apply limits. Presets are not mechanical end stops. Previous limits are stored separately for Preview and Robot USB.";
 "Scegli un URDF già espanso. Lascia le mesh nella cartella del pacchetto vicino al file." = "Choose an expanded URDF. Keep mesh files in the package folder next to it.";
@@ -1090,6 +1093,7 @@
 "Una richiesta API è già in corso." = "An API request is already in progress.";
 "Usa" = "Use";
 "Usa angoli attuali" = "Use current angles";
+"Usa i file STL originali di ToolBox Robotics (EB-15 ed EBG-30) per generare il modello dettagliato solo su questo computer." = "Uses the original ToolBox Robotics STL files (EB-15 and EBG-30) to build the detailed model on this computer only.";
 "Usa punto attuale" = "Use current point";
 "Usa solo avvisi" = "Use warnings only";
 "Usa target salvato" = "Use saved target";

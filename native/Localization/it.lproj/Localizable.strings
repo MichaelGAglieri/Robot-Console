@@ -479,6 +479,7 @@
 "Il sorgente salvato non include ancora il controllo ENABLE per giunto." = "Il sorgente salvato non include ancora il controllo ENABLE per giunto.";
 "Il target cartesiano richiede X, Y e Z." = "Il target cartesiano richiede X, Y e Z.";
 "Importa URDF…" = "Importa URDF…";
+"Importa pezzi EB-15…" = "Importa pezzi EB-15…";
 "Imposta angolo" = "Imposta angolo";
 "Imposta lo spostamento nelle schede J1–J6 e regola la velocità con gli stessi controlli del movimento singolo. Zero lascia fermo il giunto." = "Imposta lo spostamento nelle schede J1–J6 e regola la velocità con gli stessi controlli del movimento singolo. Zero lascia fermo il giunto.";
 "Imposta riferimento HOME…" = "Imposta riferimento HOME…";
@@ -733,6 +734,7 @@
 "Per abilitare 20°/s sul robot, carica il firmware incluso dalla sezione Firmware. Quello attuale resta utilizzabile fino a 10°/s." = "Per abilitare 20°/s sul robot, carica il firmware incluso dalla sezione Firmware. Quello attuale resta utilizzabile fino a 10°/s.";
 "Per gestire ENABLE serve il nuovo firmware: scollega, aggiorna i comandi giunti, compila e carica il profilo. Nessuna corrente disattivata." = "Per gestire ENABLE serve il nuovo firmware: scollega, aggiorna i comandi giunti, compila e carica il profilo. Nessuna corrente disattivata.";
 "Per gestire ENABLE serve il nuovo firmware: scollega, ripristina i sorgenti inclusi, genera e carica il profilo. Nessuna corrente disattivata." = "Per gestire ENABLE serve il nuovo firmware: scollega, ripristina i sorgenti inclusi, genera e carica il profilo. Nessuna corrente disattivata.";
+"Per il modello dettagliato importa gli STL originali EB-15 ed EBG-30 di ToolBox Robotics (licenza CC BY-NC-ND): restano solo su questo computer." = "Per il modello dettagliato importa gli STL originali EB-15 ed EBG-30 di ToolBox Robotics (licenza CC BY-NC-ND): restano solo su questo computer.";
 "Per l’IK scegli la base o un riferimento di lavoro." = "Per l’IK scegli la base o un riferimento di lavoro.";
 "Per partire e arrivare insieme, ogni giunto rispetta il proprio massimo e può rallentare. Il picco previsto considera anche l’accelerazione." = "Per partire e arrivare insieme, ogni giunto rispetta il proprio massimo e può rallentare. Il picco previsto considera anche l’accelerazione.";
 "Per sequenze, pose e HOME dell’Operatore il controllo collisioni del modello 3D non bloccherà i movimenti. Verifica visivamente il percorso reale. Limiti, velocità, comunicazione e STOP restano attivi. MoveJ/MoveL nello Studio mantengono i controlli. La scelta si azzera alla prossima connessione." = "Per sequenze, pose e HOME dell’Operatore il controllo collisioni del modello 3D non bloccherà i movimenti. Verifica visivamente il percorso reale. Limiti, velocità, comunicazione e STOP restano attivi. MoveJ/MoveL nello Studio mantengono i controlli. La scelta si azzera alla prossima connessione.";
@@ -935,6 +937,7 @@
 "Scegli" = "Scegli";
 "Scegli cartella…" = "Scegli cartella…";
 "Scegli funzione" = "Scegli funzione";
+"Scegli gli STL o gli ZIP scaricati da Thingiverse (EB-15 e EBG-30)" = "Scegli gli STL o gli ZIP scaricati da Thingiverse (EB-15 e EBG-30)";
 "Scegli il target dell’istruzione." = "Scegli il target dell’istruzione.";
 "Scegli o modifica gli intervalli, poi premi Applica limiti. I predefiniti non sono finecorsa meccanici. Gli ultimi limiti restano separati per Anteprima e Robot USB." = "Scegli o modifica gli intervalli, poi premi Applica limiti. I predefiniti non sono finecorsa meccanici. Gli ultimi limiti restano separati per Anteprima e Robot USB.";
 "Scegli un URDF già espanso. Lascia le mesh nella cartella del pacchetto vicino al file." = "Scegli un URDF già espanso. Lascia le mesh nella cartella del pacchetto vicino al file.";
@@ -1090,6 +1093,7 @@
 "Una richiesta API è già in corso." = "Una richiesta API è già in corso.";
 "Usa" = "Usa";
 "Usa angoli attuali" = "Usa angoli attuali";
+"Usa i file STL originali di ToolBox Robotics (EB-15 ed EBG-30) per generare il modello dettagliato solo su questo computer." = "Usa i file STL originali di ToolBox Robotics (EB-15 ed EBG-30) per generare il modello dettagliato solo su questo computer.";
 "Usa punto attuale" = "Usa punto attuale";
 "Usa solo avvisi" = "Usa solo avvisi";
 "Usa target salvato" = "Usa target salvato";

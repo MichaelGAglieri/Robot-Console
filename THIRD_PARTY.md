@@ -8,7 +8,7 @@ Original application and firmware sources in this release: GPL-3.0-only, Michael
 | Arduino AVR core 1.8.8 and toolchain | [Arduino](https://github.com/arduino/ArduinoCore-avr/tree/1.8.8) | External build dependencies with their own LGPL/GPL notices; installed separately |
 | Arduino CLI / IDE | Arduino | External tool; no executable redistributed in this source/app package |
 | Python, Swift/Apple frameworks | Python contributors / Apple | Runtime and platform dependencies; not bundled or relicensed here |
-| Qt 6 / PySide6 | The Qt Company and contributors | LGPL-3.0 (open-source option); installed from PyPI with `requirements.txt`, not bundled |
+| Qt 6 / PySide6 | The Qt Company and contributors | LGPL-3.0 (open-source option); installed from PyPI with `requirements.txt`; bundled unmodified in the Linux `.deb` and Windows packages (not in the macOS app) |
 | NumPy, pyserial | Respective upstream authors | BSD-3-Clause; installed from PyPI, not bundled |
 | OpenCV, Vosk, sounddevice (optional) | Respective upstream authors | Apache-2.0 / Apache-2.0 / MIT; optional, installed separately; Vosk models keep their own licenses |
 | Ollama and selected models | Respective upstream authors | Installed separately; model licenses vary and no model weights are bundled |

@@ -38,6 +38,13 @@ jobs:
           python-version: "3.12"
       - run: zsh native/build.command
       - run: codesign --verify --deep --strict "Robot Console.app"
+      - name: Bundled controller answers (Python of the runner and the Mac's /usr/bin/python3)
+        run: |
+          for python in python3 /usr/bin/python3; do
+            echo '{"op":"heartbeat"}' | DOC_REGIA_NO_HARDWARE=1 DOC_REGIA_DATA="$RUNNER_TEMP/data-$RANDOM" \
+              "$python" -u "Robot Console.app/Contents/Resources/native_bridge.py" | head -n 1 | grep -q '"state"'
+            echo "$python OK"
+          done
   release:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, 'Release Robot Console ')
     needs: [tests, macos-native]

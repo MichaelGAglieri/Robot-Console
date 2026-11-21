@@ -4,7 +4,7 @@
 
 A desktop application for **macOS, Linux and Windows** to teach, preview and replay arm poses on up to six joint channels. The physical D.O.C. reference robot has five DOF (Arduino Mega 2560 + RAMPS 1.4). It was developed during my D.O.C. robotics project and ships with that project's hardware configuration.
 
-Since 2.1.0 the app is a native **Qt (PySide6)** window on every platform. The original SwiftUI app for macOS stays in `native/` and uses the same controller.
+On **macOS** the app is the native **SwiftUI** app (`native/`). On **Linux and Windows** it is a **Qt (PySide6)** app modelled on the macOS one. Both drive the same Python controller, so features, data and firmware are the same.
 
 ## Features
 
@@ -39,13 +39,15 @@ From [Releases](https://github.com/MichaelGAglieri/Robot-Console/releases):
 
 - **Linux (Ubuntu 22.04+ / Debian 12+, x86-64):** `robot-console_<version>_amd64.deb` → `sudo apt install ./robot-console_*.deb`. It also installs the menu entry and the udev rule for the Mega serial port; then log out and in once.
 - **Windows 10/11 (x64):** `Robot-Console-<version>-Windows-x64-setup.exe` (or the portable `.zip`). The installer is not code-signed, so SmartScreen may ask *More info → Run anyway*.
-- **macOS (Apple Silicon):** `Robot-Console-<version>-macOS-arm64.dmg` → drag the app to Applications. It is ad-hoc signed, not signed with a paid Apple Developer ID: on first start right click → **Open**, or System Settings → Privacy & Security → **Open Anyway**.
+- **macOS 14+ (Apple Silicon):** `Robot-Console-<version>-macOS-AppleSilicon.dmg` → drag the SwiftUI app to Applications. It needs Python 3.9 or newer, already present with the Command Line Tools (`xcode-select --install`), Homebrew or python.org. It is ad-hoc signed, not signed with a paid Apple Developer ID: on first start right click → **Open**, or System Settings → Privacy & Security → **Open Anyway**.
 
-Packages are built by GitHub Actions with `python scripts/build_desktop.py` (PyInstaller); you can run the same script locally.
+Packages are built by GitHub Actions with `python scripts/build_desktop.py`: PyInstaller for the Qt app on Linux/Windows, `native/build.command` for the SwiftUI app on macOS. You can run the same script locally (`--qt` packages the Qt app on a Mac for testing).
 
 ### From source
 
-Requirements: **Python 3.10+** (3.12 recommended). For firmware compilation/upload install [Arduino CLI](https://arduino.github.io/arduino-cli/) or Arduino IDE; Ollama is optional.
+**macOS app:** `zsh native/build.command` (Command Line Tools) builds `Robot Console.app` in the repository folder.
+
+**Qt app** (Linux, Windows; also runs on macOS for development). Requirements: **Python 3.10+** (3.12 recommended). For firmware compilation/upload install [Arduino CLI](https://arduino.github.io/arduino-cli/) or Arduino IDE; Ollama is optional.
 
 ```sh
 git clone https://github.com/MichaelGAglieri/Robot-Console.git
@@ -73,9 +75,9 @@ Useful options: `--no-hardware` (preview only, the USB port is never opened) and
 
 - **Linux:** your user needs access to the serial port: `sudo usermod -aG dialout $USER` and log in again, or install [packaging/linux/99-robot-console.rules](packaging/linux/99-robot-console.rules). A desktop launcher template is in `packaging/linux/`. Qt needs the usual system libraries (`libegl1`, `libxkbcommon0`, `libfontconfig1`). Text-to-speech uses speech-dispatcher when installed.
 - **Windows:** install the Arduino Mega driver if the board does not appear as a COM port; close the Arduino IDE serial monitor before connecting. The J.A.R.V.I.S. local socket channel is not available on Windows.
-- **macOS:** the SwiftUI app can still be built with `zsh native/build.command` (Command Line Tools required); it is ad-hoc signed, not notarized.
+- **macOS:** use the SwiftUI app; it is ad-hoc signed, not notarized. The Qt app also starts on a Mac with `./run.sh`, useful to compare the two interfaces.
 
-Only one controller runs per data folder: close the macOS SwiftUI app before opening the Qt app on the same data, or use `--data`.
+Only one controller runs per data folder: on a Mac, close the SwiftUI app before opening the Qt app on the same data, or use `--data`.
 
 ## First use
 

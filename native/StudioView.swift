@@ -16,7 +16,7 @@ struct ArmJoint:Decodable,Identifiable {
  var id:String{name}
  var rotary:Bool{kind != "prismatic"}
 }
-struct ArmModel:Decodable {let name:String;let root:String;let tip:String;let links:[ArmLink];let joints:[ArmJoint];let warnings:[String];let source_hash:String;let approximate:Bool?;let schematic:Bool?}
+struct ArmModel:Decodable {let name:String;let root:String;let tip:String;let links:[ArmLink];let joints:[ArmJoint];let warnings:[String];let source_hash:String;let approximate:Bool?;let schematic:Bool?;let mesh_variant:String?}
 struct HomePreview:Decodable {let frames:[ArmFrame];let tcp:[Double];let model_hash:String}
 struct ArmFrame:Decodable {let name:String;let matrix:[Double]}
 struct ArmCalibration:Decodable {let sign:Double;let offset:Double}
@@ -88,6 +88,10 @@ extension Regia {
  func chooseURDF(){
   let p=NSOpenPanel();p.allowedContentTypes=[UTType(filenameExtension:"urdf") ?? .xml];p.allowsMultipleSelection=false;p.message="Scegli un URDF già espanso. Lascia le mesh nella cartella del pacchetto vicino al file."
   if p.runModal() == .OK,let url=p.url{send("studio_import",["path":url.path])}
+ }
+ func chooseEB15(){
+  let p=NSOpenPanel();p.allowedContentTypes=[.zip,UTType(filenameExtension:"stl") ?? .data];p.allowsMultipleSelection=true;p.message=T("Scegli gli STL o gli ZIP scaricati da Thingiverse (EB-15 e EBG-30)")
+  if p.runModal() == .OK,!p.urls.isEmpty{send("studio_import_eb15",["paths":p.urls.map{$0.path}])}
  }
  func studioFile(_ operation:String){
   if operation == "studio_open" {
@@ -453,9 +457,10 @@ struct StudioSetupPanel:View {
  var body:some View {
   Panel(title:"Modello del braccio · URDF e calibrazione") {
    if let s=m.studio {
-    HStack {RText(s.model.name).font(.headline).foregroundStyle(RobotTheme.accentText);Spacer();Button("Importa URDF…"){m.chooseURDF()}.disabled(!canConfigure);Button("Apri progetto…"){m.studioFile("studio_open")}.disabled(!canConfigure);Button("Esporta progetto…"){m.studioFile("studio_export")}.disabled(!m.idle || m.firmware.busy)}
+    HStack {RText(s.model.name).font(.headline).foregroundStyle(RobotTheme.accentText);Spacer();Button("Importa URDF…"){m.chooseURDF()}.disabled(!canConfigure);Button("Importa pezzi EB-15…"){m.chooseEB15()}.disabled(!canConfigure).help(T("Usa i file STL originali di ToolBox Robotics (EB-15 ed EBG-30) per generare il modello dettagliato solo su questo computer."));Button("Apri progetto…"){m.studioFile("studio_open")}.disabled(!canConfigure);Button("Esporta progetto…"){m.studioFile("studio_export")}.disabled(!m.idle || m.firmware.busy)}
     RText(s.status).robotCaption().foregroundStyle(RobotTheme.secondary)
-    if s.model.schematic == true{RText("DOC schematico: geometria indicativa, non una calibrazione del robot fisico.").robotCaption().foregroundStyle(.orange)}
+    if s.model.schematic == true || s.model.mesh_variant == "schematic"{RText("DOC schematico: geometria indicativa, non una calibrazione del robot fisico.").robotCaption().foregroundStyle(.orange)}
+    if s.model.mesh_variant == "schematic"{RText("Per il modello dettagliato importa gli STL originali EB-15 ed EBG-30 di ToolBox Robotics (licenza CC BY-NC-ND): restano solo su questo computer.").robotCaption().foregroundStyle(RobotTheme.secondary)}
     DisclosureGroup("Giunti, mapping hardware e TCP",isExpanded:$expanded){
      VStack(alignment:.leading,spacing:12){
       RText("Escludere un giunto blocca i comandi e le sequenze che lo richiedono. Non disabilita elettricamente il driver. Mapping, TCP e calibrazione del modello si modificano da fermo senza azzerare il controllore; richiedono una nuova verifica di corrispondenza.").robotCaption().foregroundStyle(RobotTheme.secondary)

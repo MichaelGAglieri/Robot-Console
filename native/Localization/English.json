@@ -1257,5 +1257,9 @@
   "Da una posa all’altra si muove un giunto alla volta, con le pause impostate.": "Between poses, joints move one at a time with the configured pauses.",
   "Partenza dalla posizione attuale. Le pose attive vengono raggiunte nell’ordine visibile, con giunti simultanei.": "Starts from the current position. Enabled poses are reached in the displayed order, with simultaneous joint movement.",
   "Il ciclo parte dalla posizione attuale e termina sull’ultima posa. Il ritorno a HOME avviene se selezionato. La pinza mantiene l’ultima richiesta.": "The cycle starts from the current position and ends at the last pose. HOME is reached if selected. The gripper keeps its last command.",
-  "Durata stimata %.1f s": "Estimated duration %.1f s"
+  "Durata stimata %.1f s": "Estimated duration %.1f s",
+  "Importa pezzi EB-15…": "Import EB-15 parts…",
+  "Usa i file STL originali di ToolBox Robotics (EB-15 ed EBG-30) per generare il modello dettagliato solo su questo computer.": "Uses the original ToolBox Robotics STL files (EB-15 and EBG-30) to build the detailed model on this computer only.",
+  "Per il modello dettagliato importa gli STL originali EB-15 ed EBG-30 di ToolBox Robotics (licenza CC BY-NC-ND): restano solo su questo computer.": "For the detailed model import the original ToolBox Robotics EB-15 and EBG-30 STL files (CC BY-NC-ND licence): they stay on this computer only.",
+  "Scegli gli STL o gli ZIP scaricati da Thingiverse (EB-15 e EBG-30)": "Choose the STL files or ZIP archives downloaded from Thingiverse (EB-15 and EBG-30)"
 }

@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (c) 2026 Michael Giuseppe Aglieri
-"""Build the packaged Qt app for the current system.
+"""Build the desktop package for the current system.
 
-    python scripts/build_desktop.py            # macOS: .app + .dmg · Linux: .deb · Windows: setup .exe (+ .zip)
+    python scripts/build_desktop.py            # macOS: SwiftUI app .dmg · Linux: Qt .deb · Windows: Qt setup .exe (+ .zip)
     python scripts/build_desktop.py --check    # also start the packaged controller and check one reply
+    python scripts/build_desktop.py --qt       # macOS only: package the Qt app instead (for testing it on a Mac)
 
-Needs the packages in requirements.txt plus PyInstaller. Python and Qt are bundled, so
-the packages run without a Python installation. Output goes to dist/.
+macOS: the main app is the SwiftUI one (native/), built with native/build.command
+(Command Line Tools); it runs the controller with the Python 3 already on the Mac.
+Linux/Windows: the Qt app, built with PyInstaller (requirements.txt + PyInstaller);
+Python and Qt are bundled. Output goes to dist/.
 
 The macOS app is ad-hoc signed only (no paid Apple Developer ID): on first start use
 right click → Open, or System Settings → Privacy & Security → Open Anyway.
@@ -74,20 +77,66 @@ def windows_icon():
     image.save(str(target), 'ICO')
 
 
-def check(executable):
+def check(command, label='Packaged controller'):
     """Start the packaged controller, send one heartbeat, expect a state reply."""
     with tempfile.TemporaryDirectory() as data:
         env = dict(os.environ, DOC_REGIA_DATA=data, DOC_REGIA_NO_HARDWARE='1')
-        process = subprocess.run([str(executable), '--controller'], input='{"op":"heartbeat"}\n', capture_output=True,
+        process = subprocess.run([str(c) for c in command], input='{"op":"heartbeat"}\n', capture_output=True,
                                  text=True, encoding='utf-8', env=env, timeout=120)
     lines = [l for l in process.stdout.splitlines() if l.strip()]
     reply = json.loads(lines[0]) if lines else {}
     if 'state' not in reply or reply.get('error'):
-        raise SystemExit('Packaged controller check failed:\n' + process.stdout[-2000:] + process.stderr[-2000:])
-    print('Packaged controller OK: mode %s, model %s' % (reply['state'].get('mode'), (reply.get('studio') or {}).get('name')))
+        raise SystemExit(label + ' check failed:\n' + process.stdout[-2000:] + process.stderr[-2000:])
+    print('%s OK: mode %s, model %s' % (label, reply['state'].get('mode'), (reply.get('studio') or {}).get('name')))
 
 
-def macos():
+def make_dmg(app, dmg, note):
+    """Drag-to-Applications disk image with a short bilingual note."""
+    staging = Path(tempfile.mkdtemp())
+    try:
+        shutil.copytree(app, staging / app.name, symlinks=True)
+        (staging / 'Applications').symlink_to('/Applications')
+        (staging / 'LEGGIMI - READ ME.txt').write_text(note, encoding='utf-8')
+        if dmg.exists():
+            dmg.unlink()
+        run('hdiutil', 'create', '-volname', NAME, '-srcfolder', staging, '-fs', 'HFS+', '-format', 'UDZO', '-ov', dmg)
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+
+
+SIGNATURE_NOTE = """\
+L'app ha una firma ad-hoc, non una firma Apple Developer ID: al primo avvio clic destro
+sull'app > Apri (oppure Impostazioni di Sistema > Privacy e sicurezza > Apri comunque).
+
+The app is ad-hoc signed, not signed with an Apple Developer ID: on first start right click
+the app > Open (or System Settings > Privacy & Security > Open Anyway).
+"""
+
+
+def macos_swift():
+    """The main macOS app: SwiftUI interface + the Python controller run by the Mac's Python 3."""
+    run('zsh', ROOT / 'native/build.command')
+    built = ROOT / (NAME + '.app')
+    with open(built / 'Contents/Info.plist', 'rb') as f:
+        plist = plistlib.load(f)
+    if plist['CFBundleShortVersionString'] != VERSION:
+        raise SystemExit('native/Info.plist is %s, qtui/__init__.py is %s: align the versions' % (plist['CFBundleShortVersionString'], VERSION))
+    app = DIST / built.name
+    DIST.mkdir(exist_ok=True)
+    shutil.copytree(built, app, symlinks=True)
+    run('codesign', '--verify', '--deep', '--strict', app)
+    dmg = DIST / ('Robot-Console-%s-macOS-AppleSilicon.dmg' % VERSION)
+    make_dmg(app, dmg, ('Robot Console %s (macOS 14+, Apple Silicon)\n\n'
+                        'Trascina Robot Console in Applicazioni. Serve Python 3.9 o successivo: quello degli\n'
+                        'Strumenti da riga di comando (xcode-select --install), di Homebrew o di python.org.\n\n'
+                        'Drag Robot Console to Applications. Python 3.9 or newer is required: the one from the\n'
+                        'Command Line Tools (xcode-select --install), Homebrew or python.org.\n\n' % VERSION) + SIGNATURE_NOTE)
+    resources = app / 'Contents/Resources'
+    pythons = [sys.executable] + [p for p in ('/usr/bin/python3',) if Path(p).exists()]  # 3.9 on a plain Mac
+    return [dmg], [[python, '-u', resources / 'native_bridge.py'] for python in pythons]
+
+
+def macos_qt():
     app = DIST / (NAME + '.app')
     info = app / 'Contents/Info.plist'
     with open(info, 'rb') as f:
@@ -101,29 +150,9 @@ def macos():
     # Ad-hoc signature: no Apple Developer ID needed; Gatekeeper asks once.
     run('codesign', '--force', '--deep', '--sign', '-', app)
     run('codesign', '--verify', '--deep', '--strict', app)
-    arch = platform.machine()
-    dmg = DIST / ('Robot-Console-%s-macOS-%s.dmg' % (VERSION, arch))
-    staging = Path(tempfile.mkdtemp())
-    try:
-        shutil.copytree(app, staging / app.name, symlinks=True)
-        (staging / 'Applications').symlink_to('/Applications')
-        (staging / 'LEGGIMI - READ ME.txt').write_text(textwrap.dedent('''\
-            Robot Console %s
-
-            Trascina Robot Console in Applicazioni. Al primo avvio: clic destro sull'app > Apri
-            (oppure Impostazioni di Sistema > Privacy e sicurezza > Apri comunque).
-            L'app ha una firma ad-hoc, non una firma Apple Developer ID.
-
-            Drag Robot Console to Applications. On first start: right click the app > Open
-            (or System Settings > Privacy & Security > Open Anyway).
-            The app is ad-hoc signed, not signed with an Apple Developer ID.
-            ''' % VERSION), encoding='utf-8')
-        if dmg.exists():
-            dmg.unlink()
-        run('hdiutil', 'create', '-volname', NAME, '-srcfolder', staging, '-fs', 'HFS+', '-format', 'UDZO', '-ov', dmg)
-    finally:
-        shutil.rmtree(staging, ignore_errors=True)
-    return [dmg], app / 'Contents/MacOS' / NAME
+    dmg = DIST / ('Robot-Console-%s-Qt-macOS-%s.dmg' % (VERSION, platform.machine()))
+    make_dmg(app, dmg, 'Robot Console %s · Qt (test build)\n\nTrascina Robot Console in Applicazioni.\nDrag Robot Console to Applications.\n\n' % VERSION + SIGNATURE_NOTE)
+    return [dmg], [[app / 'Contents/MacOS' / NAME, '--controller']]
 
 
 def linux():
@@ -182,7 +211,7 @@ def linux():
         run('dpkg-deb', '--build', '--root-owner-group', root, deb)
     finally:
         shutil.rmtree(root.parent, ignore_errors=True)
-    return [deb], DIST / NAME / NAME
+    return [deb], [[DIST / NAME / NAME, '--controller']]
 
 
 def windows():
@@ -240,25 +269,30 @@ def windows():
         outputs.append(DIST / ('Robot-Console-%s-Windows-x64-setup.exe' % VERSION))
     else:
         print('Inno Setup not found: only the .zip was created.')
-    return outputs, folder / (NAME + '.exe')
+    return outputs, [[folder / (NAME + '.exe'), '--controller']]
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--check', action='store_true', help='run the packaged controller once after the build')
+    parser.add_argument('--qt', action='store_true', help='macOS: package the Qt app instead of the SwiftUI app')
     options = parser.parse_args()
     for old in (DIST / NAME, DIST / (NAME + '.app')):
         shutil.rmtree(old, ignore_errors=True)
-    windows_icon()
-    pyinstaller()
-    if sys.platform == 'darwin':
-        outputs, executable = macos()
-    elif os.name == 'nt':
-        outputs, executable = windows()
+    if sys.platform == 'darwin' and not options.qt:
+        outputs, checks = macos_swift()
     else:
-        outputs, executable = linux()
+        windows_icon()
+        pyinstaller()
+        if sys.platform == 'darwin':
+            outputs, checks = macos_qt()
+        elif os.name == 'nt':
+            outputs, checks = windows()
+        else:
+            outputs, checks = linux()
     if options.check:
-        check(executable)
+        for command in checks:
+            check(command, 'Packaged controller (%s)' % Path(str(command[0])).name)
     for path in outputs:
         print('Created %s (%.1f MB)' % (path, path.stat().st_size / 1e6))
 

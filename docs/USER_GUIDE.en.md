@@ -34,7 +34,7 @@ The following procedures describe build45. The bundled `docs/CAMPI_E_SEQUENZE.md
 
 ## 02 · First launch and testing without hardware
 
-Start **Robot Console** with `run.sh` (macOS and Linux) or `run.bat` (Windows): the first start creates the `.venv` Python environment with PySide6. On macOS the SwiftUI app in Applications is also available. Launching does not automatically connect the Mega or upload firmware. Ollama, ROS 2 and Arduino CLI are needed only for their respective features. `--no-hardware` never opens the USB port; `--data FOLDER` uses a separate data folder.
+On macOS open **Robot Console** from Applications (SwiftUI app). On Linux and Windows use the installed package or, from source, `run.sh` (Linux) or `run.bat` (Windows): the first start creates the `.venv` Python environment with PySide6. Launching does not automatically connect the Mega or upload firmware. Ollama, ROS 2 and Arduino CLI are needed only for their respective features. `--no-hardware` never opens the USB port; `--data FOLDER` uses a separate data folder.
 
 To learn without moving the robot:
 
@@ -328,7 +328,7 @@ For a compile error, inspect the first meaningful diagnostic. For upload failure
 
 ## 21 · Robot voice commands and confirmation
 
-Open **Move and observe → Robot voice commands**. This differs from AI chat dictation. The macOS app uses Apple's local speech recognition. In the Qt app (macOS, Linux, Windows) type the command in the field, or dictate it offline with Vosk: install `vosk` and `sounddevice` (`requirements-optional.txt`) and copy a Vosk model for the language (for example vosk-model-small-en-us) into the data folder under `speech/en` or `speech/it`. No audio leaves the computer. Typed or spoken, the confirmation is still “yes, confirm” and expires after 30 seconds. Ollama does not interpret these motor commands.
+Open **Move and observe → Robot voice commands**. This differs from AI chat dictation. The macOS app uses Apple's local speech recognition. In the Qt app (Linux, Windows) type the command in the field, or dictate it offline with Vosk: install `vosk` and `sounddevice` (`requirements-optional.txt`) and copy a Vosk model for the language (for example vosk-model-small-en-us) into the data folder under `speech/en` or `speech/it`. No audio leaves the computer. Typed or spoken, the confirmation is still “yes, confirm” and expires after 30 seconds. Ollama does not interpret these motor commands.
 
 Press **Talk to robot** and speak clearly. “Move J2 by 5 degrees” requests a relative change. “Move J2 to 5 degrees” is absolute. “Move J1 to 5 degrees, J2 to 3 and J3 to minus 2” prepares a simultaneous group. “Start pose 1” follows the first pose's taught route, gripper and dwell and remains there.
 
