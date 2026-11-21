@@ -550,7 +550,9 @@ class MainWindow(QMainWindow):
         self.allow_quit = True
         self.settings.setValue('geometry', self.saveGeometry())
         self.m.shutdown()
-        QApplication.instance().quit()
+        # exit(), not quit(): on macOS quit() goes through [NSApp terminate:], which calls exit() while
+        # PySide still owns the widgets and crashes in their teardown (closing from ⌘Q or the Dock).
+        QApplication.instance().exit(0)
 
 
 def _padded(widget):
