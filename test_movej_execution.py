@@ -36,7 +36,7 @@ class MoveJExecutionBase(StudioFixture):
     def execute(self, plan):
         self.s.action(dict(op='studio_movej_execute', id=plan['id'], confirmed=True))
 
-    def wait(self, condition=None, timeout=10):
+    def wait(self, condition=None, timeout=30):  # whole programs with grip pauses: slow CI runners need margin
         end = time.monotonic()+timeout
         while time.monotonic() < end:
             if (condition() if condition else not (self.c.busy or self.s.movej.executing)): return
