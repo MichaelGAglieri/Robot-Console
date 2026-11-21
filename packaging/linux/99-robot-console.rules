@@ -1,0 +1,6 @@
+# Arduino Mega 2560 (ATmega16U2) and common CH340 clones for Robot Console.
+# Install:  sudo cp 99-robot-console.rules /etc/udev/rules.d/ && sudo udevadm control --reload-rules && sudo udevadm trigger
+# Alternatively add your user to the serial group once:  sudo usermod -aG dialout $USER  (log out and back in)
+SUBSYSTEM=="tty", ATTRS{idVendor}=="2341", ATTRS{idProduct}=="0042", MODE="0660", GROUP="dialout", TAG+="uaccess"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="2a03", ATTRS{idProduct}=="0042", MODE="0660", GROUP="dialout", TAG+="uaccess"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", MODE="0660", GROUP="dialout", TAG+="uaccess"

@@ -11,6 +11,13 @@ class SequenceFixture(unittest.TestCase):
   def move(a,d,g,record=True):
    self.c.pos[a]=self.c.validate(a,d);self.commands.append((a,d))
    if record:self.c.trail.append(dict(axis=a,delta=d))
+  def group(deltas,g,record=True,scale=1.):
+   import uuid
+   edges=[];key=uuid.uuid4().hex
+   for i,d in enumerate(deltas):
+    if d:move(i,d,g,False);edges.append(dict(axis=i,delta=d,group=key))
+   if record:self.c.trail.extend(edges)
+  self.c.move_group=group
   self.c.move=move;self.c.servo=lambda cmd,g:self.commands.append(cmd);self.c.spawn=lambda fn:fn(self.c.generation)
  def pose(self,name,path,grip='non comandata'):
   pos=[0]*6
@@ -22,13 +29,13 @@ class Tests(SequenceFixture):
   a=[dict(axis=0,delta=10)];b=a+[dict(axis=1,delta=20)]
   self.c.sequence=[self.pose('A',a,'apri'),self.pose('B',b,'chiudi')]
   self.edit('pose_move',index=1,target=0);self.c.action(dict(op='play'))
-  self.assertEqual(self.commands,[(0,10),(1,20),'chiudi',(1,-20),'apri',(0,-10)])
-  self.assertEqual(self.c.pos,[0]*6);self.assertEqual(self.c.trail,[])
- def test_delete_preserves_path(self):
+  self.assertEqual(self.commands,[(0,10),(1,20),'chiudi',(1,-20),'apri'])
+  self.assertEqual(self.c.pos,[10,0,0,0,0,0]);self.assertTrue(self.c.home)
+ def test_delete_ignores_archived_path_in_remaining_pose(self):
   a=[dict(axis=0,delta=10)];b=a+[dict(axis=1,delta=20)]
   self.c.sequence=[self.pose('A',a),self.pose('B',b)]
   self.edit('pose_delete',index=0);self.assertEqual(self.c.sequence[0]['path'],b)
-  self.c.action(dict(op='play'));self.assertEqual(self.c.pos,[0]*6)
+  self.c.action(dict(op='play'));self.assertEqual(self.c.pos,[10,20,0,0,0,0]);self.assertEqual(self.commands,[(0,10),(1,20)])
  def test_grip_record_edit_persist(self):
   self.c.grip='chiudi';self.c.action(dict(op='record',name='presa'))
   self.assertEqual(self.c.sequence[0]['grip'],'chiudi')
@@ -52,7 +59,7 @@ class Tests(SequenceFixture):
   a=[dict(axis=0,delta=10)];b=[dict(axis=1,delta=20)]
   self.c.sequence=[self.pose('A',a),self.pose('B',b)]
   self.c.action(dict(op='play'))
-  self.assertEqual(self.commands,[(0,10),(0,-10),(1,20),(1,-20)])
+  self.assertEqual(self.commands,[(0,10),(0,-10),(1,20)])
  def test_limits(self):
   self.c.sequence=[self.pose('A',[dict(axis=0,delta=91)])]
   with self.assertRaises(ValueError):self.c.action(dict(op='play'))

@@ -6,7 +6,7 @@ from unittest.mock import Mock
 from assistant_local import Assistant,Journal
 class LocalizationTests(unittest.TestCase):
  def test_catalog_placeholders_match_and_key_controls_are_translated(self):
-  root=Path(__file__).parent;catalog=json.loads((root/'native/Localization/English.json').read_text());token=re.compile(r'%(?:\d+\$)?(?:@|lld|ld|d|g|(?:\.\d+)?f)|%%')
+  root=Path(__file__).parent;catalog=json.loads((root/'native/Localization/English.json').read_text(encoding='utf-8'));token=re.compile(r'%(?:\d+\$)?(?:@|lld|ld|d|g|(?:\.\d+)?f)|%%')
   for key,value in catalog.items():self.assertEqual(token.findall(key),token.findall(value),key)
   for key in ('Guida','Lingua','Muovi e osserva','Conferma HOME','Carica sulla Mega…','Microstepping, riduttori e sorgenti','J%lld massimo','Scollega controllo'):self.assertNotEqual(catalog[key],key)
   for language in ('it','en'):self.assertTrue((root/f'native/Localization/{language}.lproj/Localizable.strings').is_file())

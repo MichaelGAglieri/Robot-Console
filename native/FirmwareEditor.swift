@@ -10,8 +10,9 @@ struct FirmwareAxisDraft {
  var driver:String;var steps:String;var micro:String;var ratio:String;var invert:Bool;var active:Bool;var stepPin:String;var dirPin:String;var enablePin:String
  init(_ a:FirmwareAxis){driver=a.driver;steps=String(a.steps);micro=String(a.microstep);ratio=String(format:"%g",a.reduction);invert=a.invert;active=a.active ?? false;stepPin=String(a.step_pin ?? -1);dirPin=String(a.dir_pin ?? -1);enablePin=String(a.enable_pin ?? -1)}
  func value()throws->FirmwareAxis {
-  guard let s=Int(steps),let m=Int(micro),let r=Double(ratio.replacingOccurrences(of:",",with:".")),r.isFinite else{throw NSError(domain:"Compila passi/giro, microstep e riduzione con numeri validi.",code:1)}
-  return FirmwareAxis(driver:driver,steps:s,microstep:m,reduction:r,invert:invert,active:active,step_pin:Int(stepPin),dir_pin:Int(dirPin),enable_pin:Int(enablePin))
+  guard let s=Int(InputDraft.normalized(steps)),let m=Int(InputDraft.normalized(micro)),let r=InputDraft.number(ratio),r.isFinite else{throw NSError(domain:"Compila passi/giro, microstep e riduzione con numeri validi.",code:1)}
+  guard let step=InputDraft.integer(stepPin,range:-1...69),let dir=InputDraft.integer(dirPin,range:-1...69),let enable=InputDraft.integer(enablePin,range:-1...69) else{throw NSError(domain:"Completa STEP, DIR ed ENA con pin validi (−1 se non collegato).",code:1)}
+  return FirmwareAxis(driver:driver,steps:s,microstep:m,reduction:r,invert:invert,active:active,step_pin:step,dir_pin:dir,enable_pin:enable)
  }
 }
 struct FirmwareParameterRow:View {

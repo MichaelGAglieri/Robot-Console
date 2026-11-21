@@ -3,7 +3,7 @@
 """Editable firmware workspace and validated parameters for the current Mega.
 Saving never flashes a board. All historical revisions remain local.
 """
-import copy, hashlib, json, math, re, shutil, time
+import copy, hashlib, json, math, re, shutil, time, tempfile
 from pathlib import Path
 
 DEFAULT=dict(schema=1,name='DOC · Mega 2560 / RAMPS 1.4',board='mega2560',axes=[dict(driver='DM542' if i==1 else 'A4988',steps=200,microstep=8,reduction=38.4,invert=False) for i in range(5)]+[dict(driver='DM542',steps=200,microstep=8,reduction=38.4,invert=False,active=False,step_pin=-1,dir_pin=-1,enable_pin=-1)])
@@ -84,8 +84,10 @@ class FirmwareWorkspace:
   c=self.controller
   return dict(multi_axis_source='FEATURES MULTI_AXIS_V1' in self.file('RegiaDemo.ino').read_text(),axis_control_source='FEATURES AXIS_ENABLE' in self.file('RegiaDemo.ino').read_text(),profile=self.profile,identity=identity(self.profile),default=DEFAULT,max_speed=speed_limit(self.profile),files=self.files(),folder=str(self.path),status=self.status,error=self.error,received_identity=getattr(c,'firmware_profile',''),matches=c.hardware_ok())
  def backup(self):
-  name=time.strftime('%Y%m%d-%H%M%S')+'-'+str(time.time_ns()%1_000_000)
-  dest=self.folder/'revisions'/name;dest.parent.mkdir(exist_ok=True);shutil.copytree(self.path,dest)
+  revisions=self.folder/'revisions';revisions.mkdir(exist_ok=True)
+  # Atomically reserve a unique revision even if clocks repeat or saves are concurrent.
+  dest=Path(tempfile.mkdtemp(prefix=time.strftime('%Y%m%d-%H%M%S')+'-',dir=revisions))
+  shutil.copytree(self.path,dest,dirs_exist_ok=True)
   if (self.folder/'profile.json').exists():shutil.copyfile(self.folder/'profile.json',dest/'profile.json')
  def save_file(self,name,content):
   self.gate();p=self.file(name)

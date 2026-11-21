@@ -1,0 +1,4 @@
+# Optional features
+opencv-python-headless>=4.8   # QR codes from the local camera
+vosk>=0.3.45                  # offline dictation for voice commands and the assistant
+sounddevice>=0.4              # microphone input for vosk

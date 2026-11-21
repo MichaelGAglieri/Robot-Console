@@ -6,7 +6,17 @@ opens serial or changes firmware. No automatic recovery or model downloads.
 """
 import copy, csv, hashlib, io, json, math, os, shutil, tempfile, threading, time, uuid, zipfile
 from pathlib import Path
-from robot_model import default_urdf, parse_urdf, frames, tcp, position_ik, number
+from robot_model import default_urdf, parse_urdf, frames, tcp, number
+from work_scene import validate_scene, scene_state
+from movej_studio import MoveJPreview
+from ik_studio import CartesianPreview
+from collision import Geometry
+from validation import validate
+from program_plan import is_motion_program
+import program_lang
+import program_functions
+from movej_preview import coordinates
+from io_adapters import AdapterHub, digital
 
 class Studio:
  def __init__(self,folder,controller,journal=None,builtin=True):
@@ -14,45 +24,111 @@ class Studio:
   self.controller=controller;self.journal=journal;self.lock=threading.RLock()
   self.model=parse_urdf(default_urdf(6));self.model.update(approximate=True,schematic=True);self.raw=default_urdf(6).decode()
   self.project_name='DOC · progetto iniziale';self.preview={};self.enabled={};self.mapping={};self.calibration={};self.tool=[0,0,.10];self.tip=self.model['tip'];self.verified=False
+  self.work_frames=[];self.cartesian_targets=[];self.selected_target=''
+  self.outputs={};self.io=AdapterHub(self)
   self.obstacles=[];self.blocks=[];self.sensors={};self.recording=False;self.samples=[];self.last_sample=0;self.selected='';self.follow=True;self.status='Modello schematico: dimensioni e HOME da calibrare.'
   self.program_running=False;self.program_index=-1;self.program_error='';self.cancel=threading.Event();self.program_thread=None
+  self.movej=MoveJPreview(self);self.cartesian=CartesianPreview(self)
+  self.workcell=dict(floor=True,margin=.01);self._geometry=None;self.validation=None
+  controller.preflight=self.preflight
   self.reset_joints(default=True)
   if builtin and (Path(__file__).parent/'models/doc5/doc5.urdf').is_file():self.load_reference()
   try:
-   if (self.folder/'project.json').exists():self.load_data(json.loads((self.folder/'project.json').read_text()))
+   if (self.folder/'project.json').exists():
+    saved=json.loads((self.folder/'project.json').read_text());self.load_data(saved)
+    if saved.get('schema')==1:
+     shutil.copy2(self.folder/'project.json',self.folder/('project-prima-schema2-'+time.strftime('%Y%m%d-%H%M%S')+'-'+uuid.uuid4().hex[:8]+'.json'))
+     self.save()
   except (OSError,ValueError,KeyError,TypeError) as e:self.status='Progetto salvato non leggibile; modello iniziale attivo: '+str(e)
   if builtin and self.raw.encode() in (default_urdf(5),default_urdf(6)) and (Path(__file__).parent/'models/doc5/doc5.urdf').is_file():self.load_reference()
+  bundled=Path(__file__).parent/'models/doc5/doc5.urdf'
+  if builtin and self.model.get('reference')=='doc5-presentation' and bundled.is_file() and self.raw.encode()!=bundled.read_bytes():self.upgrade_reference()
+  elif builtin and self.model.get('reference')=='doc5-presentation':
+   import eb15_model
+   try:eb15_model.adopt(self.model,self.folder)
+   except (OSError,ValueError):pass
+   if self.model.get('mesh_variant')!=self.reference_variant()[0]:self.switch_reference_meshes()
+ def upgrade_reference(self):
+  # The bundled DOC model changed (older illustrative model -> EB-15 assembly): keep mapping, signs and scene; offsets follow the new nominal HOME.
+  backup=None
+  if (self.folder/'project.json').exists():backup=self.folder/('project-prima-modello-'+time.strftime('%Y%m%d-%H%M%S')+'.json');shutil.copy2(self.folder/'project.json',backup)
+  mapping,enabled,signs=dict(self.mapping),dict(self.enabled),{k:v['sign'] for k,v in self.calibration.items()}
+  kept=(self.project_name,self.obstacles,self.blocks,self.sensors,self.outputs)
+  self.load_reference()
+  for name in self.mapping:
+   if name in mapping:self.mapping[name]=mapping[name];self.enabled[name]=enabled.get(name,True);self.calibration[name]['sign']=signs.get(name,1)
+  self.project_name,self.obstacles,self.blocks,self.sensors,self.outputs=kept;self.save()
+  self.status='Modello DOC aggiornato ai pezzi EB-15; offset riportati alla HOME nominale.'+(' Copia del progetto precedente: '+backup.name if backup else '')
+ def attach_reference_collision(self,model,raw):
+  """The bundled DOC URDF carries a measured collision envelope (models/doc5/collision.json)."""
+  folder=Path(__file__).parent/'models/doc5'
+  try:
+   if raw!=(folder/'doc5.urdf').read_bytes():return
+   links=json.loads((folder/'collision.json').read_text())['links']
+   known={link['name'] for link in model['links']}
+   capsules={name:[dict(a=[number(v,-2,2) for v in c['a']],b=[number(v,-2,2) for v in c['b']],r=number(c['r'],.001,.5)) for c in items] for name,items in links.items() if name in known and len(items)<=8}
+  except (OSError,ValueError,KeyError,TypeError):return
+  model['collision_capsules']=capsules
+ def reference_variant(self):
+  """Detailed EB-15 meshes generated on this computer, else the bundled schematic ones."""
+  import eb15_model
+  folder=eb15_model.installed(self.folder)
+  return ('eb15',folder) if folder else ('schematic',Path(__file__).parent/'models/doc5')
  def load_reference(self):
-  source=Path(__file__).parent/'models/doc5/doc5.urdf';raw=source.read_bytes();directory=self.folder/'models'/('doc5-'+hashlib.sha256(raw).hexdigest()[:16]);directory.mkdir(parents=True,exist_ok=True)
-  self.model=parse_urdf(raw,source.parent,directory);self.model.update(approximate=True,schematic=False);self.raw=raw.decode();self.reset_joints(True);self.tip=self.model['tip'];self.tool=[0,0,0];self.follow=True;self.verified=False
+  source=Path(__file__).parent/'models/doc5/doc5.urdf';raw=source.read_bytes();variant,base=self.reference_variant()
+  directory=self.folder/'models'/('doc5-'+hashlib.sha256(raw+variant.encode()).hexdigest()[:16]);directory.mkdir(parents=True,exist_ok=True)
+  self.model=parse_urdf(raw,base,directory);self.model.update(approximate=True,schematic=False,mesh_variant=variant);self.attach_reference_collision(self.model,raw);self.raw=raw.decode();self.reset_joints(True);self.tip=self.model['tip'];self.tool=[0,0,0];self.follow=True;self.verified=False
   for joint,offset in zip(self.independent(),self.model.get('nominal_home',[])):self.calibration[joint['name']]['offset']=offset
-  self.status='Modello di visualizzazione Webots/presentazione, non CAD calibrato del DOC fisico.'
+  self.status=('Modello DOC con i pezzi EB-15 generati su questo computer; ' if variant=='eb15' else 'Modello DOC schematico; ')+'non CAD calibrato del DOC fisico.'
+ def switch_reference_meshes(self):
+  """Same URDF and joint frames with other display meshes: keep mapping, calibration and scene."""
+  keep=(copy.deepcopy(self.mapping),copy.deepcopy(self.enabled),copy.deepcopy(self.calibration),self.tool[:],self.tip,self.verified,self.project_name,self.obstacles,self.blocks,self.sensors,self.outputs)
+  self.load_reference()
+  mapping,enabled,calibration,self.tool,self.tip,self.verified,self.project_name,self.obstacles,self.blocks,self.sensors,self.outputs=keep
+  for name in self.mapping:
+   if name in mapping:self.mapping[name]=mapping[name];self.enabled[name]=enabled.get(name,True);self.calibration[name]=calibration.get(name,self.calibration[name])
+  self._geometry=None;self.save()
+ def import_eb15(self,paths):
+  import eb15_model
+  self.idle_configuration()
+  if not isinstance(paths,list) or not paths or not all(isinstance(p,str) for p in paths):raise ValueError('Scegli i pacchetti EB-15 ed EBG-30 scaricati da Thingiverse.')
+  report=eb15_model.install(paths,self.folder)
+  if self.model.get('reference')=='doc5-presentation':self.switch_reference_meshes()
+  self.status='Modello EB-15 generato localmente: %d mesh.'%report['meshes']
  def independent(self):return [j for j in self.model['joints'] if j['kind']!='fixed' and not j['mimic']]
  def effective_enabled(self):return {name:(self.controller.axes_enabled[self.mapping[name]] if self.mapping[name]>=0 else enabled) for name,enabled in self.enabled.items()}
  def reset_joints(self,default=False):
   self.preview={j['name']:max(j['lower'],min(j['upper'],0)) for j in self.independent()}
   self.enabled={j['name']:True for j in self.independent()};self.mapping={j['name']:i if default and i<6 else -1 for i,j in enumerate(self.independent())}
   self.calibration={j['name']:dict(sign=1,offset=0) for j in self.independent()};self.selected=self.independent()[0]['name']
- def idle_configuration(self):
+ def idle_edit(self):
   c=self.controller
-  if c.connected or c.busy or c.playing or c.firmware_busy or self.program_running:raise ValueError('Scollega il controllo prima di cambiare modello, mapping o calibrazione.')
+  if c.busy or c.playing or c.firmware_busy or self.program_running or self.movej.running or self.movej.executing:raise ValueError('Attendi che movimento e anteprima siano fermi prima di modificare i dati.')
+ def idle_configuration(self):
+  self.idle_edit();c=self.controller
+  if c.connected:raise ValueError('Scollega il controllo prima di cambiare modello, mapping o calibrazione.')
  def save(self):
   tmp=self.folder/'project.tmp';tmp.write_text(json.dumps(self.data(),ensure_ascii=False,indent=2));tmp.replace(self.folder/'project.json')
  def data(self):
-  return dict(schema=1,name=self.project_name,model=self.model,urdf=self.raw,preview=self.preview,enabled=self.effective_enabled(),mapping=self.mapping,calibration=self.calibration,tool=self.tool,tip=self.tip,verified=self.verified,obstacles=self.obstacles,blocks=self.blocks,sensors={k:{**v,'value':None,'stamp':0} for k,v in self.sensors.items()})
+  return dict(schema=2,outputs=dict(self.outputs),workcell=dict(self.workcell),work_frames=copy.deepcopy(self.work_frames),cartesian_targets=copy.deepcopy(self.cartesian_targets),selected_target=self.selected_target,name=self.project_name,model=self.model,urdf=self.raw,preview=self.preview,enabled=self.effective_enabled(),mapping=self.mapping,calibration=self.calibration,tool=self.tool,tip=self.tip,verified=self.verified,obstacles=self.obstacles,blocks=self.blocks,sensors={k:dict(kind=v['kind'],value=None,stamp=0.,source='non collegato') for k,v in self.sensors.items()})
  def load_data(self,data):
-  fields=('model','raw','project_name','preview','enabled','mapping','calibration','tool','tip','verified','obstacles','blocks','sensors','follow','selected','status')
+  fields=('workcell','model','raw','project_name','preview','enabled','mapping','calibration','tool','tip','verified','obstacles','blocks','sensors','outputs','follow','selected','status','work_frames','cartesian_targets','selected_target')
   previous={key:copy.deepcopy(getattr(self,key)) for key in fields}
   try:self._load_data(data)
   except Exception:
    for key,value in previous.items():setattr(self,key,value)
    raise
  def _load_data(self,data):
-  if data.get('schema')!=1:raise ValueError('Versione progetto non supportata.')
+  if type(data.get('schema'))!=int or data['schema'] not in (1,2):raise ValueError('Versione progetto non supportata.')
+  work_frames,targets=validate_scene(data.get('work_frames') if data['schema']==2 else [],data.get('cartesian_targets') if data['schema']==2 else [])
+  selected=data.get('selected_target','') if data['schema']==2 else ''
+  if not isinstance(selected,str) or selected and selected not in {t['id'] for t in targets}:raise ValueError('Target selezionato non presente.')
   # Reparse URDF rather than trusting matrices or geometry from an imported JSON.
   checked=parse_urdf(data['urdf'].encode());old=data.get('model',{})
   checked['approximate']=bool(old.get('approximate',False))
   checked['schematic']=bool(old.get('schematic',False))
+  if old.get('mesh_variant') in ('eb15','schematic'):checked['mesh_variant']=old['mesh_variant']
+  self.attach_reference_collision(checked,data['urdf'].encode())
   old_visuals={link['name']:link.get('visuals',[]) for link in old.get('links',[])}
   for link in checked['links']:
    for index,visual in enumerate(link['visuals']):
@@ -60,6 +136,13 @@ class Studio:
     if index<len(previous):
      mesh=Path(previous[index].get('mesh',''))
      if mesh.is_file() and mesh.resolve().is_relative_to(self.folder.resolve()):visual['mesh']=str(mesh.resolve())
+  # Parsing a portable/saved URDF cannot resolve assets until the validated
+  # project mesh paths above are restored. Keep genuine missing-asset warnings.
+  visuals=[v for link in checked['links'] for v in link['visuals'] if v['kind']=='mesh']
+  missing={v.get('source_mesh','') for v in visuals if not v['mesh']}
+  recovered={v.get('source_mesh','') for v in visuals if v['mesh']}-missing
+  recovered_warnings={'Mesh non disponibile: '+name+'; visualizzazione con segnaposto.' for name in recovered}
+  checked['warnings']=[warning for warning in checked['warnings'] if warning not in recovered_warnings]
   self.model=checked;self.raw=data['urdf'];self.project_name=str(data.get('name',checked['name']))[:100];self.reset_joints()
   for joint in self.independent():
    name=joint['name'];self.preview[name]=number(data.get('preview',{}).get(name,0))
@@ -77,34 +160,83 @@ class Studio:
   if self.tip not in {l['name'] for l in checked['links']}:raise ValueError('Link TCP non valido.')
   # Imported projects never authorize physical motion by themselves.
   self.verified=False;self.obstacles=self.validate_obstacles(data.get('obstacles',[]))
-  self.blocks=self.validate_blocks(data.get('blocks',[]));self.sensors={}
+  self.blocks=self.bind_pose_references(self.validate_blocks(data.get('blocks',[])));self.outputs=self.io.definitions(data.get('outputs',{}));self.sensors={}
   for name,definition in data.get('sensors',{}).items():self.define_sensor(name,definition.get('kind','digital'))
+  self.work_frames,self.cartesian_targets,self.selected_target=work_frames,targets,selected
+  self.workcell=self.validate_workcell(data.get('workcell',dict(floor=True,margin=.01)))
   self.follow=False;self.status='Progetto caricato; verifica mapping, HOME e calibrazione prima dell’uso fisico.'
+ def save_scene(self,work_frames,targets,selected):
+  self.idle_edit()
+  checked_frames,checked_targets=validate_scene(work_frames,targets)
+  if selected and selected not in {t['id'] for t in checked_targets}:selected=''
+  old=(self.work_frames,self.cartesian_targets,self.selected_target,self.status)
+  self.work_frames,self.cartesian_targets,self.selected_target=checked_frames,checked_targets,selected
+  self.status='Scena salvata: riferimenti e target geometrici, nessun comando al robot.'
+  try:self.save()
+  except Exception:
+   self.work_frames,self.cartesian_targets,self.selected_target,self.status=old
+   raise
+ def edit_scene(self,request):
+  self.idle_edit();op=request['op']
+  work_frames=copy.deepcopy(self.work_frames);targets=copy.deepcopy(self.cartesian_targets)
+  selected=self.selected_target
+  if op in ('studio_frame_save','studio_target_save'):
+   entries=work_frames if op=='studio_frame_save' else targets
+   key=request.get('id','')
+   if key and not any(e['id']==key for e in entries):raise ValueError('Elemento della scena non presente: ricarica i campi.')
+   key=key or uuid.uuid4().hex
+   entry=dict(id=key,name=request.get('name'),xyz=request.get('xyz'),rpy=request.get('rpy'))
+   if op=='studio_frame_save':entry['parent']='base'
+   else:entry['frame_id']=request.get('frame_id');selected=key
+   entries[:]=[entry if e['id']==key else e for e in entries] if any(e['id']==key for e in entries) else [*entries,entry]
+  elif op=='studio_frame_delete':
+   key=request.get('id')
+   if not any(e['id']==key for e in work_frames):raise ValueError('Riferimento di lavoro non presente o base immutabile.')
+   if any(t['frame_id']==key for t in targets):raise ValueError('Il riferimento contiene target: riassegnali o eliminali prima.')
+   work_frames=[e for e in work_frames if e['id']!=key]
+  elif op=='studio_target_delete':
+   key=request.get('id')
+   if not any(t['id']==key for t in targets):raise ValueError('Target non presente.')
+   targets=[t for t in targets if t['id']!=key]
+  else:raise ValueError('Operazione scena non valida.')
+  self.save_scene(work_frames,targets,selected)
  def current_positions(self,state=None):
   state=state or self.controller.state();result=self.preview.copy();result['__gripper']=1. if state.get('grip')=='apri' else 0.
-  if self.follow:
+  if self.movej.visual_active:
+   result['__gripper']=1. if self.movej.grip=='apri' else 0.
+  elif self.follow:
    values=state.get('preview_pos',state['pos'])
    for name,axis in self.mapping.items():
     if axis>=0:result[name]=math.radians(values[axis]) if next(j for j in self.independent() if j['name']==name)['kind']!='prismatic' else values[axis]/1000
   return result
+ @staticmethod
+ def validate_workcell(value):
+  if not isinstance(value,dict) or type(value.get('floor',True))!=bool:raise ValueError('Ambiente di lavoro non valido.')
+  return dict(floor=value.get('floor',True),margin=number(value.get('margin',.01),0,.1))
+ def geometry(self):
+  # Capsules depend only on the model and its mesh files; rebuild when either changes.
+  key=(self.model['source_hash'],tuple(v.get('mesh','') for l in self.model['links'] for v in l['visuals']))
+  if not self._geometry or self._geometry[0]!=key:self._geometry=(key,Geometry(self.model))
+  return self._geometry[1]
+ def collision_details(self,positions):
+  return self.geometry().check(positions,self.calibration,self.obstacles,self.workcell['floor'],self.workcell['margin'])
  def collision_report(self,positions):
-  f=frames(self.model,positions,self.calibration);hits=[]
-  # Conservative link-origin segments against expanded axis-aligned workcell boxes.
-  for j in self.model['joints']:
-   a=[f[j['parent']][i][3] for i in range(3)];b=[f[j['child']][i][3] for i in range(3)]
-   for box in self.obstacles:
-    lo=[box['center'][i]-box['size'][i]/2-.025 for i in range(3)];hi=[box['center'][i]+box['size'][i]/2+.025 for i in range(3)]
-    t0,t1=0.,1.
-    for i in range(3):
-     delta=b[i]-a[i]
-     if abs(delta)<1e-12:
-      if not lo[i]<=a[i]<=hi[i]:t0,t1=1,0;break
-     else:
-      x,y=sorted(((lo[i]-a[i])/delta,(hi[i]-a[i])/delta));t0=max(t0,x);t1=min(t1,y)
-    if t0<=t1:hits.append(j['child']+' / '+box['name'])
-  return hits
+  return [hit['a']+' / '+hit['b'] for hit in self.collision_details(positions)]
+ def preflight(self,source,*,repeat=False,return_home=True,index=None,motion=None):
+  """Whole-route check before Play or Run program; blocks when the model is trusted."""
+  warnings_only=source in ('sequence','home','pose') and not self.controller.operator_collision_checks
+  report=validate(self,source,repeat=repeat,return_home=return_home,index=index,collision_warnings=warnings_only,motion=motion);self.validation=report
+  if warnings_only:
+   for note in report['notes']:
+    if note.startswith('Interferenza modello'):self.controller.log('SOLO AVVISI · '+note)
+  if report['ok']:return
+  first=report['issues'][0];c=self.controller
+  message='Validazione: %d problemi; il primo %s — %s.'%(len(report['issues']),first['where'],first['detail'])
+  if c.mode=='demo' or self.verified or source in ('sequence','home','pose'):raise ValueError(message+' Apri «Valida» nel pannello Programma per i dettagli.')
+  c.log(message+' Modello non dichiarato conforme al robot: esecuzione non bloccata.')
  def state(self):
   with self.lock:
+   self.movej.tick()
    state=self.controller.state();positions=self.current_positions(state);f=frames(self.model,positions,self.calibration)
    live_positions=self.preview.copy()
    for joint in self.independent():
@@ -115,7 +247,8 @@ class Studio:
    if self.recording and now-self.last_sample>=.20:
     self.samples.append(dict(time=now,mode=state['mode'],positions=positions.copy(),commanded=state['pos'],busy=state['busy'],grip=state['grip'],sensors=copy.deepcopy(self.sensors)))
     self.samples=self.samples[-18000:];self.last_sample=now
-   return dict(name=self.project_name,model=self.model,positions=positions,enabled=self.effective_enabled(),mapping=self.mapping,calibration=self.calibration,tool=self.tool,tip=self.tip,verified=self.verified,selected=self.selected,follow=self.follow,status=self.status,
+   work_frames,cartesian_targets=scene_state(self.work_frames,self.cartesian_targets)
+   return dict(io=self.io.state(),workcell=self.workcell,validation=self.validation,cartesian=self.cartesian.state(positions),movej_preview=self.movej.state(),work_frames=work_frames,cartesian_targets=cartesian_targets,selected_target=self.selected_target,name=self.project_name,model=self.model,positions=positions,enabled=self.effective_enabled(),mapping=self.mapping,calibration=self.calibration,tool=self.tool,tip=self.tip,verified=self.verified,selected=self.selected,follow=self.follow,status=self.status,
     live_frames=[dict(name=name,matrix=[v for row in matrix for v in row]) for name,matrix in live_frames.items()],frames=[dict(name=name,matrix=[v for row in matrix for v in row]) for name,matrix in f.items()],tcp=tcp(self.model,positions,self.calibration,self.tip,self.tool),collisions=self.collision_report(positions),obstacles=self.obstacles,blocks=self.blocks,sensors=[dict(name=k,**v,age=now-v['stamp'] if v['stamp'] else -1) for k,v in self.sensors.items()],recording=self.recording,sample_count=len(self.samples),program_running=self.program_running,program_index=self.program_index,program_error=self.program_error,
     telemetry=[dict(time=s['time'],values=s['commanded']) for s in self.samples[-180:]],capabilities=dict(physical_axes=self.controller.configured_axes,physical_prismatic=False,position_source='virtuale' if state['mode']=='demo' else 'stimata; senza encoder',calibrated=self.verified))
  def import_urdf(self,path):
@@ -126,6 +259,7 @@ class Studio:
    raw=source.read_bytes();model=parse_urdf(raw,source.parent,directory)
    (directory/'source.urdf').write_bytes(raw)
   except Exception:shutil.rmtree(directory);raise
+  self.work_frames=[];self.cartesian_targets=[];self.selected_target=''
   text=raw.decode('utf-8');self.model=model;self.raw=text;self.tip=model['tip'];self.tool=[0,0,0];self.verified=False;self.follow=False;self.reset_joints();self.obstacles=[]
   self.status='URDF importato. Associa esplicitamente i giunti ai canali J1–J6; nessuna impostazione firmware modificata.';self.save()
  @staticmethod
@@ -176,6 +310,11 @@ class Studio:
   with c.lock:
    c.check()
    if c.busy or c.playing or self.program_running:raise ValueError('Controllore occupato.')
+   if c.mode=='demo' or c.multi_axis:
+    # Shared MoveJ: the same simultaneous plan, interference sampling and executor as poses/programs.
+    if c.mode=='robot' and not self.verified:raise ValueError('Conferma prima la corrispondenza fisica di modello, mapping e calibrazione.')
+    self.movej.prepare(dict(source='studio'));self.movej.execute(dict(id=self.movej.plan['id'],confirmed=True));return
+   # Legacy firmware without MULTI_AXIS_V1: one joint at a time, as before.
    positions=self.preview.copy();path=self.target_path(positions)
    def run(g):
     for step in path:c.move(step['axis'],step['delta'],g)
@@ -188,26 +327,89 @@ class Studio:
  def sensor_value(self,name,value,source='simulato'):
   if name not in self.sensors:raise ValueError('Definisci prima il sensore.')
   if type(value) not in (bool,int,float) or (type(value)!=bool and not math.isfinite(value)):raise ValueError('Valore sensore non valido.')
-  self.sensors[name].update(value=value,stamp=time.time(),source=source)
+  self.sensors[name].update(value=value,stamp=time.time(),source=source,simulated=source in ('simulato','non collegato'))
+  self.sensors[name].pop('adapter_id',None)
+ def bind_pose_references(self,blocks):
+  self.controller.ensure_pose_ids()
+  for b in blocks:
+   if b['kind']=='pose' or b['kind']=='movej' and b.get('to')=='pose':
+    if not b.get('pose_id'):
+     index=b.get('index',-1)
+     if 0<=index<len(self.controller.sequence):b['pose_id']=self.controller.sequence[index]['id']
+  return blocks
+ def pose_index(self,block):
+  if block.get('pose_id'):
+   index=next((i for i,p in enumerate(self.controller.sequence) if p.get('id')==block['pose_id']),None)
+   if index is None:raise ValueError('Posa eliminata: scegli esplicitamente un’altra posa per questa istruzione.')
+   return index
+  index=block.get('index',-1)
+  if type(index)!=int or not 0<=index<len(self.controller.sequence):raise ValueError('Posa non presente.')
+  return index
  @staticmethod
  def validate_blocks(blocks):
   if not isinstance(blocks,list) or len(blocks)>200:raise ValueError('Massimo 200 blocchi.')
   result=[]
   for raw in blocks:
    b=copy.deepcopy(raw);kind=b.get('kind')
-   if kind not in ('pose','grip','wait','sensor','repeat','note'):raise ValueError('Tipo di blocco non supportato.')
+   if kind not in ('pose','grip','wait','sensor','repeat','note','movej','movel','loop','if','else','end','set','output','function','call','return'):raise ValueError('Tipo di blocco non supportato.')
    b['name']=str(b.get('name',kind))[:80];b['enabled']=b.get('enabled',True) is True
+   if b.get('pose_id') is not None and (not isinstance(b['pose_id'],str) or not 1<=len(b['pose_id'])<=64):raise ValueError('Riferimento stabile della posa non valido.')
    if kind=='pose':
     b['index']=int(number(b.get('index',0),0,10000))
    if kind=='grip' and b.get('command') not in ('apri','chiudi'):raise ValueError('Comando pinza non valido.')
    if kind=='wait':b['seconds']=number(b.get('seconds',1),0,600)
+   if kind=='output':
+    b['output']=str(b.get('output',''))[:60];b['output_value']=digital(b.get('output_value',True));b['timeout']=number(b.get('timeout',10),.1,600)
    if kind=='sensor':b['sensor']=str(b.get('sensor',''))[:60];b['expected']=number(b.get('expected',1));b['timeout']=number(b.get('timeout',10),.1,600)
    if kind=='repeat':b['start']=int(number(b.get('start',0),0,199));b['count']=int(number(b.get('count',2),1,100))
+   if kind in ('movej','movel'):Studio.validate_motion_block(b)
+   if kind=='loop':
+    b['times']=str(b.get('times',b.get('count',2)));program_lang.parse(b['times'])
+    if b.get('variable'):program_lang.check_name(b['variable'],'Nome della variabile del ciclo')
+    else:b.pop('variable',None)
+   if kind=='if':b['condition']=str(b.get('condition',''));program_lang.parse(b['condition'])
+   if kind=='set':program_lang.check_name(b.get('variable'),'Nome della variabile');b['value']=str(b.get('value','0'));program_lang.parse(b['value'])
+   if kind in ('function','call','return'):program_functions.validate_block(b)
+   if kind in ('else','end'):b['enabled']=True  # structure markers follow their Ripeti/Se
    result.append(b)
+  # Ripeti N volte / Se ... Fine: balanced, bounded nesting. The older back-jump Ripeti stays for simple programs.
+  program_functions.definitions(result,program_lang.structure(result))
+  if any(b['kind']=='repeat' for b in result) and any(b['kind'] in ('loop','if','function','call','return') for b in result):raise ValueError('Con «Ripeti N volte» e «Se» usa la struttura … Fine al posto del vecchio blocco Ripeti.')
   # Loops are bounded and cannot contain other loop blocks.
   for i,b in enumerate(result):
    if b['kind']=='repeat' and (b['start']>=i or any(x['kind']=='repeat' for x in result[b['start']:i])):raise ValueError('Ripeti deve riferirsi a blocchi precedenti senza cicli annidati.')
   return result
+ @staticmethod
+ def validate_motion_block(b):
+  # Offline-program motion: destination, per-instruction speed (% of the joint speeds) and, for MoveL, the line options.
+  b['speed']=round(number(b.get('speed',100),10,100))
+  places=('home','joints','pose','target') if b['kind']=='movej' else ('target','point')
+  if b.get('to') not in places:raise ValueError('Destinazione '+('MoveJ' if b['kind']=='movej' else 'MoveL')+' non valida.')
+  if b['to']=='joints':b['angles']=coordinates(b.get('angles'))
+  if b['to']=='pose':b['index']=int(number(b.get('index',0),0,10000))
+  if b['to']=='target':
+   if not isinstance(b.get('target'),str) or not b['target']:raise ValueError('Scegli il target dell’istruzione.')
+   offset=b.get('offset',[0,0,0])
+   if not isinstance(offset,list) or len(offset)!=3:raise ValueError('Scostamento dal target non valido.')
+   b['offset']=[number(v,-500,500) for v in offset]
+   expressions=b.get('offset_expr')
+   if expressions is not None:
+    if not isinstance(expressions,list) or len(expressions)!=3 or any(not isinstance(e,str) for e in expressions):raise ValueError('Scostamento con variabili non valido.')
+    for e in expressions:
+     if e.strip():program_lang.parse(e)
+    b['offset_expr']=[e.strip() for e in expressions]
+    if not any(b['offset_expr']):b.pop('offset_expr')
+  if b['to']=='point':
+   if not isinstance(b.get('frame'),str) or b['frame']=='tool':raise ValueError('MoveL: scegli la base o un riferimento di lavoro.')
+   xyz=b.get('xyz')
+   if not isinstance(xyz,list) or len(xyz)!=3:raise ValueError('MoveL richiede X, Y e Z in millimetri.')
+   b['xyz']=[number(v,-2000,2000) for v in xyz]
+  if b['kind']=='movej':
+   b['orientation']=b.get('orientation','axis')
+   if b['orientation'] not in ('axis','position'):raise ValueError('Orientamento MoveJ non valido.')
+  else:
+   b['orientation']=b.get('orientation','keep');b['tolerance']=number(b.get('tolerance',.5),.05,5)
+   if b['orientation'] not in ('keep','free'):raise ValueError('Orientamento MoveL non valido.')
  def expanded_program(self):
   result=[]
   for i,b in enumerate(self.blocks):
@@ -220,8 +422,9 @@ class Studio:
   c=self.controller
   with c.lock:
    c.check()
-   if c.busy or c.playing or self.program_running or c.trail:raise ValueError('Avvia da HOME e da fermo.')
-   steps=self.expanded_program()
+   if c.busy or c.playing or self.program_running:raise ValueError('Avvia da fermo con riferimento valido.')
+   if is_motion_program(self.blocks):raise ValueError('Programma con MoveJ/MoveL: pianificalo e usa «Esegui programma…» sul piano mostrato.')
+   steps=[(i,dict(b,index=self.pose_index(b))) if b['kind']=='pose' else (i,b) for i,b in self.expanded_program()]
    if not steps:raise ValueError('Aggiungi almeno un blocco.')
    sequence=copy.deepcopy(c.sequence)
    for _,b in steps:
@@ -233,12 +436,9 @@ class Studio:
      if not 0<=b['index']<len(sequence):raise ValueError('Posa del blocco non presente.')
      pose=sequence[b['index']]
      if pose.get('mode')!=c.mode:raise ValueError('Posa appartenente a una modalità diversa.')
-     c.validate_path(pose['path']);p=[0.]*6
-     for step in pose['path']:
-      p[step['axis']]+=step['delta']
-      if not c.limits[step['axis']][0]<=p[step['axis']]<=c.limits[step['axis']][1]:raise ValueError('Programma fuori limite.')
-     if any(abs(a-b)>.02 for a,b in zip(p,pose['pos'])):raise ValueError('Posa incoerente.')
+     c.validate_pose(pose)
     if b['kind']=='sensor' and b['sensor'] not in self.sensors:raise ValueError('Sensore del blocco non definito.')
+   if any(b['kind'] in ('pose','grip') for _,b in steps):self.preflight('program',return_home=False)
    self.program_running=True;self.program_error='';self.cancel.clear();generation=c.generation
    def run(g):
     def check():
@@ -254,7 +454,7 @@ class Studio:
      for index,b in steps:
       check();self.program_index=index
       if b['kind']=='pose':
-       pose=sequence[b['index']];c.follow_path(pose['path'],g)
+       pose=sequence[b['index']];c.follow_position(pose['pos'],g)
        if pose.get('grip') in ('apri','chiudi'):c.servo(pose['grip'],g)
        wait(pose.get('dwell',0))
       elif b['kind']=='grip':c.servo(b['command'],g)
@@ -262,14 +462,14 @@ class Studio:
       elif b['kind']=='sensor':
        deadline=time.monotonic()+b['timeout']
        while True:
-        check();sensor=self.sensors[b['sensor']]
-        fresh=time.time()-sensor['stamp']<1
-        trusted=c.mode=='demo' or sensor['source'] not in ('simulato','non collegato')
-        if fresh and trusted and sensor['value']==b['expected']:break
+        check()
+        try:matched=self.movej.read_sensor(b['sensor'])==b['expected']
+        except ValueError:matched=False
+        if matched:break
         if time.monotonic()>deadline:raise ValueError('Timeout sensore: '+b['sensor'])
         time.sleep(.03)
       elif b['kind']=='note':c.log(b['name'])
-     c.back(g);c.cycle+=1;c.log('Programma completato e ritorno a HOME nel conteggio impulsi.')
+     c.cycle+=1;c.log('Programma completato; ultima posa mantenuta, riferimento valido.')
     except Exception as error:self.program_error=str(error);raise
     finally:self.program_running=False;self.program_index=-1
    c.playing=True;c.spawn(run)
@@ -278,32 +478,21 @@ class Studio:
   if not poses:raise ValueError('Nessuna posa abilitata da visualizzare.')
   if not 0<=index<len(poses):raise ValueError('Posa non valida.')
   fraction=number(fraction,0,1)
-  from server import path_units
-  previous=[] if index==0 else poses[index-1]['path'];following=poses[index]['path']
-  before=path_units(previous);after=path_units(following);common=0
-  while common<min(len(before),len(after)) and before[common]==after[common]:common+=1
-  units=[[dict(x,delta=-x['delta']) for x in unit] for unit in reversed(before[common:])]+after[common:]
-  segments=[x for unit in units for x in unit];self.controller.validate_path(segments)
-  values=[0.]*6
-  for step in previous:values[step['axis']]+=step['delta']
-  distance=sum(abs(x['delta']) for x in segments)*fraction
-  for unit in units:
-   length=sum(abs(x['delta']) for x in unit);progress=min(1.,distance/length) if length else 1.
-   for step in unit:values[step['axis']]+=step['delta']*progress
-   distance-=length
-   if distance<=0:break
+  previous=self.controller.pos[:] if index==0 else poses[index-1]['pos'];following=poses[index]['pos']
+  previous=list(previous)+[0.]*(6-len(previous));following=list(following)+[0.]*(6-len(following))
+  values=[a+(b-a)*fraction for a,b in zip(previous,following)]
   self.follow=False
   for j in self.independent():
    axis=self.mapping[j['name']]
    if axis>=0 and self.effective_enabled()[j['name']]:self.preview[j['name']]=math.radians(values[axis])
-  self.status='Anteprima del percorso registrato, inclusi i tratti a ritroso; nessun comando al robot.'
+  self.status='Anteprima della transizione diretta fra le pose attive; nessun passaggio storico nascosto.'
  def export_recording(self,path):
   output=io.StringIO();writer=csv.writer(output);writer.writerow(['time','mode','j1_deg','j2_deg','j3_deg','j4_deg','j5_deg','j6_deg','busy','gripper'])
   for s in self.samples:writer.writerow([s['time'],s['mode'],*s['commanded'],s['busy'],s['grip']])
   Path(path).write_text(output.getvalue());self.status='Registrazione CSV esportata.'
  def export_project(self,path):
   data=copy.deepcopy(self.data());data['urdf']=self.visualization_urdf(relative=True)
-  data['sequence']=copy.deepcopy(self.controller.sequence);data['firmware_identity']=getattr(self.controller,'expected_profile','')
+  data['sequence']=copy.deepcopy(self.controller.sequence);data['sequence_motion']=copy.deepcopy(self.controller.require_sequence_motion());data['firmware_identity']=getattr(self.controller,'expected_profile','')
   with zipfile.ZipFile(path,'w',zipfile.ZIP_DEFLATED) as archive:
    for link in data['model']['links']:
     for visual in link['visuals']:
@@ -331,11 +520,19 @@ class Studio:
        if mesh not in archive.namelist() or not mesh.startswith('meshes/'):raise ValueError('Mesh del progetto non valida.')
        target=destination/Path(mesh).name;target.write_bytes(archive.read(mesh));visual['mesh']=str(target)
    sequence=self.validate_project_sequence(data.get('sequence',[]))
+   from server import sequence_motion_settings
+   motion=sequence_motion_settings(data.get('sequence_motion'))
    self.load_data(data)
    for name,enabled in self.enabled.items():
     if not enabled and self.mapping[name]>=0:self.controller.action(dict(op='joint_enable',axis=self.mapping[name],enabled=False))
    if 'sequence' in data:
-    self.controller.sequence_undo=copy.deepcopy(self.controller.sequence);self.controller.sequence=sequence;self.controller.save()
+    c=self.controller
+    previous=(c.sequence_undo,c.sequence,c.sequence_motion)
+    c.sequence_undo=copy.deepcopy(c.sequence);c.sequence=sequence;c.sequence_motion=motion
+    try:c.save()
+    except OSError:
+     c.sequence_undo,c.sequence,c.sequence_motion=previous
+     raise
    self.save()
   except Exception:shutil.rmtree(destination);raise
  @staticmethod
@@ -396,7 +593,7 @@ class Studio:
    transforms=frames(self.model,zero,calibration)
    return dict(frames=[dict(name=name,matrix=[v for row in matrix for v in row]) for name,matrix in transforms.items()],tcp=tcp(self.model,zero,calibration,self.tip,self.tool),model_hash=self.model['source_hash'])
  def apply_home(self,offsets,model_hash):
-  self.idle_configuration();calibration=self.home_calibration(offsets,model_hash)
+  self.idle_edit();calibration=self.home_calibration(offsets,model_hash)
   old=dict(calibration=copy.deepcopy(self.calibration),preview=self.preview.copy(),verified=self.verified,follow=self.follow,status=self.status)
   saved=self.folder/'project.json'
   if saved.exists():
@@ -413,10 +610,41 @@ class Studio:
  def action(self,request):
   op=request['op'];c=self.controller
   with self.lock:
-   if op=='studio_home_apply':
+   if op in ('studio_preview','studio_ik','studio_ik_target','studio_ik_choose','studio_jog','studio_follow','studio_sequence','studio_home_apply','studio_import','studio_default','studio_open'):
+    self.movej.clear()
+   if op=='studio_sequence_motion':
+    self.idle_edit()
+    from server import sequence_motion_settings
+    motion=sequence_motion_settings(request.get('motion'))
+    previous=c.sequence_motion
+    c.sequence_motion=motion
+    try:c.save()
+    except OSError:
+     c.sequence_motion=previous
+     raise
+    self.movej.clear()
+   elif op=='studio_operator_collisions':
+    self.idle_edit();enabled=request.get('enabled')
+    if type(enabled)!=bool:raise ValueError('Scelta controllo modello non valida.')
+    if not enabled and request.get('confirmed') is not True:raise ValueError('Conferma esplicita richiesta per usare solo avvisi del modello.')
+    c.operator_collision_checks=enabled;c.pending_voice=None;self.movej.clear()
+    c.log('Interferenze modello in Operatore: '+('bloccanti.' if enabled else 'SOLO AVVISI per sequenze, pose e HOME. Limiti, velocità e STOP restano attivi.'))
+   elif op=='studio_movej_plan':self.movej.prepare(request)
+   elif op=='studio_movej_play':self.movej.play(request.get('id'))
+   elif op=='studio_movej_seek':self.movej.seek(request.get('id'),request.get('elapsed'))
+   elif op=='studio_movej_stop':self.movej.stop()
+   elif op=='studio_movej_execute':self.movej.execute(request)
+   elif op=='studio_movej_clear':self.movej.clear()
+   elif op=='studio_home_apply':
     if request.get('confirmed') is not True:raise ValueError('Conferma esplicita richiesta.')
     self.apply_home(request.get('offsets'),request.get('model_hash'))
+   elif op in ('studio_frame_save','studio_frame_delete','studio_target_save','studio_target_delete'):self.edit_scene(request)
+   elif op=='studio_target_select':
+    key=request.get('id','')
+    if not isinstance(key,str) or key and not any(t['id']==key for t in self.cartesian_targets):raise ValueError('Target non presente.')
+    self.selected_target=key
    elif op=='studio_import':self.import_urdf(request['path'])
+   elif op=='studio_import_eb15':self.import_eb15(request.get('paths'))
    elif op=='studio_default':
     self.idle_configuration();self.load_reference();self.save()
    elif op=='studio_preview':
@@ -438,7 +666,7 @@ class Studio:
      if axis>=0:c.action(dict(op='joint_enable',axis=axis,enabled=enabled))
      self.enabled[name]=enabled
     if any(k in request for k in ('axis','offset','sign')):
-     self.idle_configuration();axis=request.get('axis',self.mapping[name])
+     self.idle_edit();axis=request.get('axis',self.mapping[name])
      if type(axis)!=int or not -1<=axis<6:raise ValueError('Canale hardware non valido.')
      if axis>=0 and any(v==axis and key!=name for key,v in self.mapping.items()):raise ValueError('Canale già associato a un altro giunto.')
      sign=number(request.get('sign',self.calibration[name]['sign']),-1,1)
@@ -446,34 +674,49 @@ class Studio:
      self.calibration[name]=dict(sign=sign,offset=number(request.get('offset',self.calibration[name]['offset']),-20,20));self.mapping[name]=axis;self.verified=False
     self.save()
    elif op=='studio_tcp':
-    self.idle_configuration();tip=request['tip'];tool=[number(v,-2,2) for v in request['tool']]
+    self.idle_edit();tip=request['tip'];tool=[number(v,-2,2) for v in request['tool']]
     if tip not in {l['name'] for l in self.model['links']} or len(tool)!=3:raise ValueError('TCP non valido.')
     self.tip=tip;self.tool=tool;self.verified=False;self.save()
    elif op=='studio_verified':
-    self.idle_configuration();self.verified=request.get('confirmed') is True;self.status='Corrispondenza fisica dichiarata dall’operatore; la console non la misura.';self.save()
-   elif op=='studio_ik':
-    enabled=self.effective_enabled()
-    result=position_ik(self.model,self.current_positions(),request['target'],enabled,self.calibration,self.tip,self.tool)
-    self.status=('Target raggiungibile nel modello' if result['converged'] else 'Target non raggiunto: soluzione approssimata')+' · errore %.2f mm'%(result['error_m']*1000)
-    self.preview=result['positions'];self.follow=False
+    self.idle_edit();self.verified=request.get('confirmed') is True;self.status='Corrispondenza fisica dichiarata dall’operatore; la console non la misura.';self.save()
+   elif op=='studio_ik':self.cartesian.point(request)
+   elif op=='studio_ik_target':self.cartesian.target(request)
+   elif op=='studio_ik_choose':self.cartesian.choose(request.get('index'))
+   elif op=='studio_jog':self.cartesian.jog(request)
    elif op=='studio_execute':
     if request.get('confirmed') is not True:raise ValueError('Conferma esplicita richiesta.')
     self.execute_preview()
-   elif op=='studio_obstacles':self.idle_configuration();self.obstacles=self.validate_obstacles(request['boxes']);self.save()
+   elif op=='studio_obstacles':self.idle_edit();self.obstacles=self.validate_obstacles(request['boxes']);self.save()
+   elif op=='studio_workcell':
+    self.idle_edit();self.workcell=self.validate_workcell(dict(floor=request.get('floor',self.workcell['floor']),margin=number(request.get('margin',self.workcell['margin']*1000),0,100)/1000));self.save()
+    self.status='Ambiente aggiornato: piano di lavoro %s, margine %.0f mm.'%('attivo' if self.workcell['floor'] else 'escluso',self.workcell['margin']*1000)
+   elif op=='studio_validate':
+    report=validate(self,request.get('source','program'),return_home=request.get('return_home',False));self.validation=report
+    self.status=('Validazione superata: %d pose, %d campioni, nessun problema.'%(report['poses'],report['samples']) if report['ok'] else 'Validazione: %d problemi lungo i percorsi.'%len(report['issues']))
    elif op=='studio_blocks':
     if c.busy or c.playing or self.program_running:raise ValueError('Attendi prima di modificare il programma.')
-    self.blocks=self.validate_blocks(request['blocks']);self.save()
+    self.blocks=self.bind_pose_references(self.validate_blocks(request['blocks']));self.save()
    elif op=='studio_run':
     if request.get('confirmed') is not True:raise ValueError('Conferma esplicita richiesta.')
     self.run_program()
+   elif op=='studio_program_plan':self.movej.prepare(dict(source='program',scenario=request.get('scenario') or {},offline=True))
+   elif op=='studio_program_execute':
+    plan=self.movej.plan
+    if not plan or plan.get('program') is None or plan.get('id')!=request.get('id'):raise ValueError('Piano del programma scaduto: ripianifica dopo le modifiche.')
+    self.movej.execute(dict(id=request.get('id'),confirmed=request.get('confirmed'),step=request.get('step') is True))
+   elif op=='studio_program_step':self.movej.release()
+   elif op=='studio_program_continue':self.movej.release(continuous=True)
    elif op=='studio_cancel':self.cancel.set();c.action(dict(op='stop'))
    elif op=='studio_record':
     enabled=request.get('enabled') is True
     if enabled and not self.recording:self.samples=[]
     self.recording=enabled
    elif op=='studio_export_csv':self.export_recording(request['path'])
-   elif op=='studio_export':self.idle_configuration();self.export_project(request['path'])
+   elif op=='studio_export':self.idle_edit();self.export_project(request['path'])
    elif op=='studio_open':self.import_project(request['path'])
+   elif op=='studio_output_add':
+    if c.busy or c.playing or self.movej.executing:raise ValueError('Attendi prima di definire un’uscita.')
+    self.io.define(request['name']);self.save()
    elif op=='studio_sensor_add':self.define_sensor(request['name'],request.get('kind','digital'));self.save()
    elif op=='studio_sensor_value':
     if c.mode!='demo':raise ValueError('Gli ingressi sintetici sono disponibili solo in Anteprima.')

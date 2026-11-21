@@ -19,15 +19,14 @@ class PoseEditorTests(SequenceFixture):
   with patch.object(server.Controller,'io',lambda s:None):loaded=server.Controller()
   self.assertEqual(loaded.sequence[0],p)
   self.edit('pose_undo');self.assertEqual(self.c.sequence[0]['name'],'Old')
- def test_angles_extend_then_replace(self):
+ def test_angles_replace_target_without_an_old_anchor(self):
   base=[dict(axis=0,delta=10)];self.c.sequence=[self.pose('A',base)]
   self.edit('pose_update',**self.request(pos=[15,20,0,0,0]))
-  self.assertEqual(self.c.sequence[0]['path'],base+[dict(axis=0,delta=5),dict(axis=1,delta=20)])
+  self.assertEqual(self.c.sequence[0]['pos'],[15,20,0,0,0,0]);self.assertEqual([(e['axis'],e['delta']) for e in self.c.sequence[0]['path']],[(0,15),(1,20)])
   self.edit('pose_update',**self.request(pos=[12,0,0,0,0]))
-  self.assertEqual(self.c.sequence[0]['path'],base+[dict(axis=0,delta=2)])
+  self.assertEqual([(e['axis'],e['delta']) for e in self.c.sequence[0]['path']],[(0,12)])
   self.c.action(dict(op='play'))
-  self.assertEqual(self.commands,[(0,10),(0,2),(0,-2),(0,-10)])
-  self.assertEqual(self.c.pos,[0]*6)
+  self.assertEqual(self.commands,[(0,12)]);self.assertEqual(self.c.pos,[12,0,0,0,0,0])
  def test_disabled_actions_and_all_disabled(self):
   a=[dict(axis=0,delta=10)];b=a+[dict(axis=1,delta=20)]
   self.c.sequence=[self.pose('A',a,'chiudi'),self.pose('B',b,'apri')]
@@ -54,6 +53,6 @@ class PoseEditorTests(SequenceFixture):
  def test_720_degree_change_split(self):
   self.c.limits=[[-360,360]]*5;self.c.sequence=[self.pose('A',[dict(axis=0,delta=-360)])]
   self.edit('pose_update',**self.request(pos=[360,0,0,0,0]))
-  self.assertEqual([x['delta'] for x in self.c.sequence[0]['path']],[-360,360,360])
+  self.assertEqual([x['delta'] for x in self.c.sequence[0]['path']],[360]);self.c.pos=[-360,0,0,0,0,0];self.c.action(dict(op='play'));self.assertEqual(self.commands,[(0,360),(0,360)])
   self.assertTrue(all(abs(x['delta'])<=360 for x in self.c.sequence[0]['path']))
 if __name__=='__main__':unittest.main()

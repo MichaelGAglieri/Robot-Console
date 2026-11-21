@@ -1,0 +1,5 @@
+# Robot Console desktop app (Python 3.10+)
+PySide6>=6.6
+numpy>=1.24
+# Serial port on Windows (macOS and Linux use the standard library termios driver)
+pyserial>=3.5; sys_platform == "win32"

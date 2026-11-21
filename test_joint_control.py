@@ -93,6 +93,13 @@ class JointControlTests(unittest.TestCase):
  def test_protocol_capabilities_not_assumed_or_carried_across_connect(self):
   c=self.c;self.real();c.receive('FEATURES AXIS_ENABLE');c.receive('DRIVE_CAPS 101110');self.assertEqual(c.drive_caps,[True,False,True,True,True,False])
   c.action(dict(op='disconnect'));c.action(dict(op='connect',mode='demo'));self.assertFalse(c.axis_control);self.assertEqual(c.drive_state,[None]*6)
+ def test_workspace_backups_cannot_collide_when_clock_values_repeat(self):
+  self.c.connected=False;w=FirmwareWorkspace(self.folder,self.c)
+  source=w.file('RegiaDemo.ino');original=source.read_text()
+  with patch('firmware_workspace.time.strftime',return_value='same-second'),patch('firmware_workspace.time.time_ns',return_value=123000):
+   w.backup();source.write_text(original+'\n// seconda revisione\n');w.backup()
+  revisions=list((w.folder/'revisions').glob('same-second-*'))
+  self.assertEqual(len(revisions),2);self.assertEqual(len({(r/'RegiaDemo.ino').read_text() for r in revisions}),2);self.c.write.assert_not_called()
  def test_workspace_upgrade_preserves_profile_headers_and_revision(self):
   c=self.c;c.connected=False;w=FirmwareWorkspace(self.folder,c);profile=copy.deepcopy(DEFAULT);profile['axes'][0].update(reduction=20,microstep=16);w.generate(profile)
   old=w.file('RegiaDemo.ino').read_text().replace('FEATURES AXIS_ENABLE','LEGACY');w.save_file('RegiaDemo.ino',old)

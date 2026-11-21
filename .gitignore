@@ -46,3 +46,7 @@ webots_sim/worlds/.*.wbproj
 
 # Internal development audit; not part of the public release
 docs/DEVELOPMENT_2_0.md
+
+# Packaged desktop builds
+dist/
+qtui/icons/app.ico

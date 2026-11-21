@@ -1,9 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (c) 2026 Michael Giuseppe Aglieri
 """Regression: Mega bootloader must see a quiet UART before the first hello."""
-import os,pty,select,time,threading,unittest
+import os,select,time,threading,unittest
+try:import pty
+except ImportError:pty=None # Windows: no pseudo-terminals
 from unittest.mock import patch
-import server
+import serial_transport,server
+@unittest.skipIf(pty is None,'pseudo-terminals are POSIX only')
 class MegaBoot(unittest.TestCase):
  def test_silent_boot_then_identity_then_heartbeat(self):
   master,slave=pty.openpty();path=os.ttyname(slave);stop=threading.Event();chunks=[];started=time.monotonic();booted=False
@@ -24,7 +27,7 @@ class MegaBoot(unittest.TestCase):
      elif line.startswith(b'speed '):os.write(master,b'SPEED 5.00\r\n')
   thread=threading.Thread(target=board);thread.start();c=server.Controller()
   try:
-   with patch.object(server.glob,'glob',return_value=[path]),patch.object(server.fcntl,'ioctl'):
+   with patch.object(serial_transport,'candidate_ports',return_value=[path]),patch.object(serial_transport.fcntl,'ioctl'):
     c.action(dict(op='connect',mode='robot',port=path));connected=c.connected_at
     until=time.monotonic()+6
     while not c.speed_confirmed and time.monotonic()<until:c.action(dict(op='heartbeat'));time.sleep(.02)

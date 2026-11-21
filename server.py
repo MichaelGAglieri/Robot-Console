@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (c) 2026 Michael Giuseppe Aglieri
-"""Local-only DOC presentation controller. No third-party Python dependencies."""
-import hashlib, uuid, json, math, os, select, termios, threading, time, glob, secrets, fcntl, struct
+"""Robot controller shared by every Robot Console front end (serial protocol, poses, sequences).
+The old browser mode, whose page was no longer shipped, has been removed."""
+import hashlib, uuid, json, math, os, threading, time, secrets
 from pathlib import Path
-from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 ROOT=Path(__file__).resolve().parent
 DATA=Path(os.environ.get("DOC_REGIA_DATA", str(ROOT)))
 DATA.mkdir(parents=True,exist_ok=True)
 from voice_commands import parse_command, confirmation
-from serial_transport import ensure_port_available, claim_exclusive
+import serial_transport
+from serial_transport import ensure_port_available
 USB_BOOT_QUIET=3.0
 HELLO_RETRY=4.0
 AXES=6
-TOKEN=secrets.token_urlsafe(24)
 def path_units(path):
  """Legacy edges stay sequential; explicit contiguous groups are atomic."""
  units=[];seen=set()
@@ -28,6 +28,54 @@ def path_units(path):
    seen.add(group)
   units.append([edge])
  return units
+
+def direct_units(start, target):
+ """Explicit straight joint-space transitions. Never reads a pose's archived jog path.
+ Splits at 360 degrees per command, keeping every channel synchronized per segment.
+ """
+ if not isinstance(start,list) or not isinstance(target,list) or len(start)!=AXES or len(target)!=AXES:
+  raise ValueError('Servono sei angoli per il movimento fra pose.')
+ if any(type(v) not in (int,float) or not math.isfinite(v) or not -360<=v<=360 for v in start+target):
+  raise ValueError('Angoli delle pose non validi.')
+ target=[round(v,2) for v in target];start=[round(v,2) for v in start]
+ count=max(1,math.ceil(max(abs(b-a) for a,b in zip(start,target))/360));previous=start;result=[]
+ for k in range(1,count+1):
+  point=[round(a+(b-a)*k/count,2) for a,b in zip(start,target)];group=uuid.uuid4().hex
+  unit=[dict(axis=i,delta=round(b-a,2),group=group) for i,(a,b) in enumerate(zip(previous,point)) if abs(b-a)>.005]
+  if unit:result.append(unit)
+  previous=point
+ return result
+
+def sequence_motion_settings(value=None):
+ """Validate the saved joint order and the pause after each axis, in seconds."""
+ if value is None:return dict(mode='simultaneous',order=list(range(AXES)),pauses=[0.]*AXES)
+ if not isinstance(value,dict) or value.get('mode') not in ('simultaneous','ordered'):
+  raise ValueError('Modalità di movimento della sequenza non valida.')
+ order=value.get('order');pauses=value.get('pauses')
+ if not isinstance(order,list) or any(type(axis)!=int for axis in order) or sorted(order)!=list(range(AXES)):
+  raise ValueError('L’ordine deve contenere ogni giunto una sola volta.')
+ if not isinstance(pauses,list) or len(pauses)!=AXES or any(type(v) not in (int,float) or not math.isfinite(v) or not 0<=v<=60 for v in pauses):
+  raise ValueError('Ogni pausa tra giunti deve essere tra 0 e 60 secondi.')
+ return dict(mode=value['mode'],order=order[:],pauses=[round(v,2) for v in pauses])
+
+def sequence_units(start,target,motion=None):
+ """Return (motion group, pause after the group) for one sequence transition."""
+ units=direct_units(start,target)
+ if not motion or motion['mode']=='simultaneous' or not units:
+  return [(unit,0.) for unit in units]
+ point=[round(v,2) for v in start]
+ target=[round(v,2) for v in target]
+ axes=[axis for axis in motion['order'] if point[axis]!=target[axis]]
+ result=[]
+ for index,axis in enumerate(axes):
+  next_point=point[:]
+  next_point[axis]=target[axis]
+  steps=direct_units(point,next_point)
+  result.extend((step,0.) for step in steps[:-1])
+  pause=motion['pauses'][axis] if index+1<len(axes) else 0.
+  result.append((steps[-1],pause))
+  point=next_point
+ return result
 
 def motion_duration(distance,speed,a=20.0):
  distance=abs(distance)
@@ -47,12 +95,14 @@ class Controller:
  def __init__(self):
   self.journal=None; self.firmware_busy=False; self.lock=threading.RLock(); self.fd=None; self.mode='demo'; self.connected=False
   self.home=False; self.pos=[0.0]*AXES; self.limits=[[0.0,0.0] for _ in range(AXES)]
-  self.trail=[]; self.sequence=[]; self.events=[];self.robot_events=[];self.event_counter=0; self.busy=False; self.playing=False
-  self.repeat_cycle=False; self.paused=False; self.generation=0; self.done=threading.Event(); self.browser=time.monotonic()
+  self.trail=[]; self.sequence=[]; self.sequence_motion=sequence_motion_settings(); self.events=[];self.robot_events=[];self.event_counter=0; self.busy=False; self.playing=False
+  self.repeat_cycle=False; self.sequence_return_home=False; self.paused=False; self.generation=0; self.done=threading.Event(); self.browser=time.monotonic()
   self.speed=5.0; self.requested_speed=5.0; self.speed_confirmed=False; self.speed_sent=0.0; self.firmware=''; self.connected_at=0.0; self.last_hello=0.0
   self.sequence_undo=None; self.max_speed=20.0; self.sequence_revision=0; self.awaiting_halt=False; self.boot_ready_at=0.0; self.serial_lines=0; self.last_serial=''; self.error=''; self.grip='non comandata'; self.cycle=0; self.identified=False; self.rx=b''
   self.axes_enabled=[True]*AXES;self.motion=None;self.firmware_profile="";self.profile_error="";self.profile_speed_limit=20.;self.reported_axes=5;self.configured_axes=5
   self.pending_voice=None;self.multi_axis=False;self.multi_ack=False;self.pulses_per_rev=[61440]*AXES
+  self.operator_collision_checks=True # session only; reset on connection, never imported from projects
+  self.preflight=None # whole-route check installed by Studio; never moves anything
   self.axis_speeds=[5.0]*AXES;self.multi_axis=False;self.axis_control=False;self.drive_caps=[False]*AXES;self.drive_state=[None]*AXES;self.pending_off={};self.preparing_axis=None
   try:
    values=json.loads((DATA/'axis_speeds.json').read_text())
@@ -66,11 +116,25 @@ class Controller:
   except (OSError,ValueError):self.axes_enabled=[False]*AXES;self.error='Abilitazione giunti illeggibile: movimenti bloccati.'
   if (DATA/'sequenza.json').exists():
    try:
-    self.sequence=json.loads((DATA/'sequenza.json').read_text())['sequence']
+    saved=json.loads((DATA/'sequenza.json').read_text());self.sequence=saved['sequence']
     for pose in self.sequence:
      if isinstance(pose.get('pos'),list) and len(pose['pos'])==5:pose['pos'].append(0.)
+    try:self.sequence_motion=sequence_motion_settings(saved.get('motion'))
+    except ValueError:self.error='Ordine giunti salvato non valido. Verifica e salva le impostazioni della sequenza.';self.sequence_motion=None
    except (ValueError,KeyError):self.error='Sequenza salvata non leggibile'
+  if self.ensure_pose_ids() and (DATA/'sequenza.json').is_file():
+   original=(DATA/'sequenza.json').read_bytes();backup=DATA/'sequenza-prima-id.json'
+   if not backup.exists():backup.write_bytes(original)
+   migrated=json.loads(original);migrated['sequence']=self.sequence
+   tmp=DATA/'sequenza-id.tmp';tmp.write_text(json.dumps(migrated,ensure_ascii=False,indent=2));tmp.replace(DATA/'sequenza.json')
   threading.Thread(target=self.io,daemon=True).start()
+ def ensure_pose_ids(self):
+  seen=set();changed=False
+  for pose in self.sequence:
+   key=pose.get('id')
+   if not isinstance(key,str) or not key or len(key)>64 or key in seen:pose['id']=uuid.uuid4().hex;changed=True
+   seen.add(pose['id'])
+  return changed
  def log(self,s):
   self.event_counter+=1
   self.robot_events=(self.robot_events+[dict(id=self.event_counter,time=time.time(),mode=self.mode,text=s)])[-300:]
@@ -79,7 +143,7 @@ class Controller:
    try:self.journal.add('event',self.mode,s)
    except Exception:pass # Storage errors must never prevent STOP.
  def write(self,s):
-  if self.fd is not None: os.write(self.fd,s.encode())
+  if self.fd is not None: serial_transport.write(self.fd,s.encode())
  def halt(self,reason,send=True):
   with self.lock:
    try:
@@ -93,6 +157,10 @@ class Controller:
   with self.lock:
    self.serial_lines+=1; self.last_serial=s[:180]
    if self.serial_lines<=8:self.log('USB RX: '+s[:180])
+   # Before identification nothing is armed: HALTED/ERROR WATCHDOG here are leftovers the
+   # board printed after the previous session closed, not a fault of this connection.
+   if self.connected and not self.identified and not (self.home or self.busy or self.awaiting_halt) and s in ('HALTED','ERROR WATCHDOG'):
+    self.log('Riga della sessione precedente ignorata: '+s);return
    if s.startswith('DOC REGIA '):
     self.firmware=s
     if s not in ('DOC REGIA 2','DOC REGIA 4'):
@@ -172,14 +240,13 @@ class Controller:
      if any(now-deadline>3 for deadline in self.pending_off.values()):
       for axis in self.pending_off:self.drive_state[axis]=None
       self.pending_off.clear();self.halt('Disabilitazione non confermata: corrente del driver non verificata.');continue
-     if select.select([self.fd],[],[],0)[0]:
-      data=os.read(self.fd,4096)
-      if not data:raise OSError('USB scollegata')
+     data=serial_transport.read(self.fd)
+     if data:
       self.rx+=data
       while b'\n' in self.rx:
        line,self.rx=self.rx.split(b'\n',1);self.receive(line.decode(errors='replace').strip())
     except OSError as e:
-     self.halt(str(e));self.connected=False;os.close(self.fd);self.fd=None
+     self.halt(str(e));self.connected=False;serial_transport.close(self.fd);self.fd=None
  def guide(self):
   if not self.connected:return '1 · Avvia Anteprima senza hardware oppure scegli Robot USB e connetti la porta.'
   if not self.identified and self.connected and time.monotonic()<self.boot_ready_at:return '1 · Avvio Mega: attendo 3 secondi senza trasmettere sulla USB.'
@@ -188,7 +255,7 @@ class Controller:
   if not self.hardware_ok():return '1 · Firmware e profilo non corrispondono: verifica i parametri e il sorgente, poi genera e carica il firmware corretto.'
   if not self.home:return '2 · Conferma HOME: scegli la posizione iniziale del braccio. In Anteprima confermi solo uno zero virtuale.'
   if all(lo==hi for lo,hi in self.limits):return '3 · Imposta e applica i limiti. Ora sono tutti 0/0: ogni giunto è bloccato. Per esempio, in Anteprima prova J1 da -5 a +5.'
-  return '4 · Muovi con +/−, osserva il risultato e premi Registra posa. Per riprodurre torna prima a HOME.'
+  return '4 · Muovi con +/−, osserva il risultato e premi Registra posa. Riproduci dalla posizione attuale con riferimento HOME valido.'
  def state(self):
   with self.lock:
    preview=self.pos[:]
@@ -199,7 +266,7 @@ class Controller:
       progress=motion_fraction(1,m['path_speed'],time.time()-m['started'],m['path_acceleration'])
       preview[i]=m['starts'][i]+(m['targets'][i]-m['starts'][i])*progress
     else:preview[m['axis']]=m['start']+(m['target']-m['start'])*f
-   return dict(robot_events=self.robot_events[:],multi_axis=self.mode=='demo' or self.multi_axis,active_axes=self.motion.get('axes',[self.motion.get('axis')]) if self.motion else [],axis_speeds=[min(v,self.max_speed) for v in self.axis_speeds],axis_control=self.mode=='demo' or self.axis_control,drive_caps=[True]*AXES if self.mode=='demo' else self.drive_caps,drive_state=self.drive_state,pending_off=list(self.pending_off),active_axis=self.motion.get('axis') if self.motion else self.preparing_axis,axes_available=[self.mode=='demo' or i<min(self.reported_axes,self.configured_axes) for i in range(AXES)],hardware_ok=self.hardware_ok(),firmware_profile=self.firmware_profile,mode=self.mode,connected=self.connected,home=self.home,pos=self.pos[:],preview_pos=preview,motion=self.motion,axes_enabled=self.axes_enabled[:],limits=self.limits,trail=len(self.trail),sequence=self.sequence,sequence_revision=self.sequence_revision,can_undo=self.sequence_undo is not None,max_speed=self.max_speed,events=self.events,busy=self.busy,playing=self.playing,paused=self.paused,error=self.error,grip=self.grip,identified=self.identified,firmware=self.firmware,speed=self.speed,speed_confirmed=self.speed_confirmed,guidance=self.guide(),cycle=self.cycle,ports=glob.glob('/dev/cu.usbmodem*')+glob.glob('/dev/cu.usbserial*'))
+   return dict(sequence_motion=self.sequence_motion,operator_collision_checks=self.operator_collision_checks,robot_events=self.robot_events[:],multi_axis=self.mode=='demo' or self.multi_axis,active_axes=self.motion.get('axes',[self.motion.get('axis')]) if self.motion else [],axis_speeds=[min(v,self.max_speed) for v in self.axis_speeds],axis_control=self.mode=='demo' or self.axis_control,drive_caps=[True]*AXES if self.mode=='demo' else self.drive_caps,drive_state=self.drive_state,pending_off=list(self.pending_off),active_axis=self.motion.get('axis') if self.motion else self.preparing_axis,axes_available=[self.mode=='demo' or i<min(self.reported_axes,self.configured_axes) for i in range(AXES)],hardware_ok=self.hardware_ok(),firmware_profile=self.firmware_profile,mode=self.mode,connected=self.connected,home=self.home,pos=self.pos[:],preview_pos=preview,motion=self.motion,axes_enabled=self.axes_enabled[:],limits=self.limits,trail=len(self.trail),sequence=self.sequence,sequence_revision=self.sequence_revision,can_undo=self.sequence_undo is not None,max_speed=self.max_speed,events=self.events,busy=self.busy,playing=self.playing,paused=self.paused,error=self.error,grip=self.grip,identified=self.identified,firmware=self.firmware,speed=self.speed,speed_confirmed=self.speed_confirmed,guidance=self.guide(),cycle=self.cycle,ports=serial_transport.candidate_ports())
  def hardware_ok(self):
   if self.profile_error:return False
   expected=getattr(self,'expected_profile','')
@@ -211,12 +278,12 @@ class Controller:
   if not self.identified or not self.speed_confirmed:raise ValueError('Firmware o velocità non confermati: completa la connessione.')
   if not self.hardware_ok():raise ValueError('Firmware e profilo hardware non corrispondono. Genera, compila e carica il profilo scelto.')
   if not self.home:raise ValueError('Metti fisicamente il braccio nella home e confermala.')
- def validate(self,a,d):
+ def validate(self,a,d,*,starts=None):
   if not isinstance(a,int) or not 0<=a<AXES:raise ValueError('Asse non valido')
   if not isinstance(d,(int,float)) or not math.isfinite(d) or abs(d)>360:raise ValueError('Angolo non valido')
   if self.mode=='robot' and a>=min(self.reported_axes,self.configured_axes):raise ValueError('J6 richiede firmware configurato e driver esterno: nessun impulso inviato.')
   if not self.axes_enabled[a] and abs(d)>.001:raise ValueError('J%d disabilitato: riabilitalo prima di comandare questo movimento.'%(a+1))
-  target=round(self.pos[a]+d,2)
+  target=round((self.pos if starts is None else starts)[a]+d,2)
   if not self.limits[a][0]<=target<=self.limits[a][1]:raise ValueError('Il movimento supera i limiti impostati di J'+str(a+1))
   return target
  def move(self,a,d,gen,record=True):
@@ -254,24 +321,37 @@ class Controller:
    self.pos[a]=target;self.motion=None
    self.log('J%d %+.2f° → %.2f° · %s'%(a+1,d,target,'anteprima' if self.mode=='demo' else 'DONE firmware, posizione non misurata'))
    if record:self.trail.append(dict(axis=a,delta=d))
-   if len(self.trail)>4000:self.halt('Percorso troppo lungo: salva e ristabilisci home.');raise ValueError('Limite percorso')
+   if len(self.trail)>4000:self.trail=self.trail[-4000:] # bounded history; HOME uses current angles, not this log
  def servo(self,command,gen):
   with self.lock:
    if gen!=self.generation:raise ValueError('Interrotto')
    self.check();self.write(command+'\n');self.grip=command;self.busy=True
-  for _ in range(30):
+  # At least 1.5 s for the servo, against a deadline: late wake-ups of short sleeps must not add up.
+  end=time.monotonic()+1.5
+  while True:
    if gen!=self.generation:raise ValueError('Interrotto')
-   time.sleep(.05)
- def group_plan(self,deltas):
+   left=end-time.monotonic()
+   if left<=0:break
+   time.sleep(min(.05,left))
+ def group_plan(self,deltas,*,starts=None,scale=1.):
+  # Preview callers may plan a later segment without mutating commanded positions.
+  # `scale` is a program instruction's share of the Muovi e osserva joint speeds.
+  if type(scale) not in (int,float) or not .1-1e-9<=scale<=1:raise ValueError('Velocità dell’istruzione: da 10% a 100%.')
+  base=self.pos if starts is None else starts
+  if starts is not None:
+   if not isinstance(base,list) or len(base)!=AXES or any(type(v) not in (int,float) or not math.isfinite(v) for v in base):raise ValueError('Posizione iniziale MoveJ non valida.')
+   if any(not lo<=v<=hi for v,(lo,hi) in zip(base,self.limits)):raise ValueError('Posizione iniziale MoveJ fuori dai limiti applicati.')
   if not isinstance(deltas,list) or len(deltas)!=AXES or any(type(d) not in (int,float) or not math.isfinite(d) or abs(d)>360 for d in deltas):raise ValueError('Inserisci sei spostamenti relativi da -360 a 360 gradi.')
-  deltas=[round(d,2) for d in deltas];targets=self.pos[:];axes=[]
+  deltas=[round(d,2) for d in deltas];targets=base[:];axes=[]
   for i,d in enumerate(deltas):
    if not d:continue
-   targets[i]=self.validate(i,d);axes.append(i)
+   targets[i]=self.validate(i,d,starts=base);axes.append(i)
    if abs(d)*self.pulses_per_rev[i]/360<.5:raise ValueError('Spostamento inferiore a un impulso: aumenta l’angolo.')
   if not axes:raise ValueError('Inserisci almeno uno spostamento diverso da zero.')
   if self.mode=='robot' and not self.multi_axis:raise ValueError('Movimento simultaneo: aggiorna e carica il firmware con MULTI_AXIS_V1.')
   speeds=[min(v,self.max_speed) for v in self.axis_speeds]
+  # The Mega accepts 1–20 °/s per axis, in hundredths: scaled speeds keep that floor.
+  if scale!=1:speeds=[max(1.,round(v*scale,2)) for v in speeds]
   total=sum(math.floor(abs(deltas[i])*self.pulses_per_rev[i]/360+.5) for i in axes)
   path_speed=min(min(speeds[i]/abs(deltas[i]) for i in axes),2000./total)
   path_acceleration=min(20./abs(deltas[i]) for i in axes)
@@ -279,7 +359,7 @@ class Controller:
   duration=motion_duration(1,path_speed,path_acceleration)
   return deltas,targets,axes,speeds,effective,duration,path_speed,path_acceleration
  def group_context(self):
-  return hashlib.sha256((self.voice_context()+json.dumps([self.max_speed,self.profile_speed_limit,self.pulses_per_rev,self.configured_axes,self.reported_axes])).encode()).hexdigest()
+  return hashlib.sha256((self.voice_context()+json.dumps([self.max_speed,self.profile_speed_limit,self.pulses_per_rev,self.configured_axes,self.reported_axes,self.operator_collision_checks,self.sequence_motion])).encode()).hexdigest()
  def preview_group(self,deltas):
   with self.lock:
    try:
@@ -291,16 +371,17 @@ class Controller:
     return dict(valid=True,error='',deltas=d,targets=targets,axes=axes,requested=speeds,effective=effective,peaks=[abs(v)*peak for v in d],duration=duration,budget_limited=budget_limited,context=self.group_context())
    except (ValueError,TypeError) as error:
     return dict(valid=False,error=str(error),deltas=[],targets=[],axes=[],requested=[min(v,self.max_speed) for v in self.axis_speeds],effective=[0.]*AXES,peaks=[0.]*AXES,duration=0.,budget_limited=False,context='')
- def move_group(self,deltas,gen,record=True):
+ def move_group(self,deltas,gen,record=True,scale=1.):
   with self.lock:
    self.check()
    if gen!=self.generation:raise ValueError('Interrotto')
-   deltas,targets,axes,speeds,effective,duration,path_speed,path_acceleration=self.group_plan(deltas)
+   deltas,targets,axes,speeds,effective,duration,path_speed,path_acceleration=self.group_plan(deltas,scale=scale)
    self.busy=True;self.done.clear();self.multi_ack=False
    self.motion=dict(path_speed=path_speed,path_acceleration=path_acceleration,axes=axes,starts=self.pos[:],targets=targets,speeds=effective,started=time.time(),duration=duration)
    # One fully validated line, no per-axis start commands or streamed queue.
    self.write('~multi '+' '.join('%.2f %.2f'%(d,v) for d,v in zip(deltas,speeds))+'\n')
-   self.log('Movimento simultaneo: '+', '.join('J%d %.2f°/s'%(i+1,effective[i]) for i in axes)+' · velocità limitate dal budget impulsi totale.')
+   label='Movimento simultaneo' if len(axes)>1 else 'Movimento'
+   self.log(label+': '+', '.join('J%d %.2f°/s'%(i+1,effective[i]) for i in axes)+' · velocità limitate dal budget impulsi totale.')
   deadline=time.monotonic()+(duration if self.mode=='demo' else duration*2+4)
   while True:
    if gen!=self.generation:raise ValueError('Interrotto')
@@ -315,7 +396,7 @@ class Controller:
    if record:
     group=uuid.uuid4().hex
     self.trail.extend(dict(axis=i,delta=deltas[i],group=group) for i in axes)
-   if len(self.trail)>4000:self.halt('Percorso troppo lungo.');raise ValueError('Limite percorso')
+   if len(self.trail)>4000:self.trail=self.trail[-4000:]
    self.log('Gruppo completato · '+('anteprima' if self.mode=='demo' else 'DONE firmware, posizione non misurata'))
  def run_unit(self,unit,gen,reverse=False,record=True):
   if unit[0].get('group') is not None:
@@ -329,12 +410,57 @@ class Controller:
    if gen!=self.generation:raise ValueError('Interrotto')
    time.sleep(.05)
   if gen!=self.generation:raise ValueError('Interrotto')
+ def target_units(self,target,starts=None):
+  """Prevalidate the entire direct transition before starting its first segment."""
+  start=list(self.pos if starts is None else starts)
+  units=direct_units(start,list(target))
+  self.validate_target_units(units,start)
+  return units
+ def validate_target_units(self,units,start):
+  for unit in units:
+   deltas=[0.]*AXES
+   for edge in unit:deltas[edge['axis']]=edge['delta']
+   if self.mode=='robot' and not self.multi_axis:
+    if len(unit)>1:raise ValueError('La transizione fra pose richiede il firmware MULTI_AXIS_V1.')
+    self.validate(unit[0]['axis'],unit[0]['delta'],starts=start)
+   else:self.group_plan(deltas,starts=start)
+   start=[round(a+d,2) for a,d in zip(start,deltas)]
+ def run_target_unit(self,unit,gen):
+  self.wait_ready(gen)
+  if self.mode=='robot' and not self.multi_axis:self.move(unit[0]['axis'],unit[0]['delta'],gen)
+  else:self.run_unit(unit,gen)
+ def follow_position(self,target,gen):
+  for unit in self.target_units(target):self.run_target_unit(unit,gen)
+  self.wait_ready(gen)
+  if all(abs(v)<=.005 for v in self.pos):self.trail.clear()
+ def require_sequence_motion(self):
+  if self.sequence_motion is None:raise ValueError('Verifica e salva l’ordine dei giunti prima di avviare la sequenza.')
+  return self.sequence_motion
+ def follow_sequence_position(self,target,gen,motion):
+  if motion['mode']=='simultaneous':
+   self.follow_position(target,gen)
+   return
+  start=self.pos[:]
+  stages=sequence_units(start,target,motion)
+  self.validate_target_units((unit for unit,_ in stages),start)
+  for unit,pause in stages:
+   self.run_target_unit(unit,gen)
+   if pause:
+    self.log('Pausa dopo J%d: %.2f s'%(unit[0]['axis']+1,pause))
+    self.wait_sequence_pause(pause,gen)
+  self.wait_ready(gen)
+  if all(abs(v)<=.005 for v in self.pos):self.trail.clear()
+ def wait_sequence_pause(self,seconds,gen):
+  end=time.monotonic()+seconds
+  while True:
+   self.wait_ready(gen)
+   remaining=end-time.monotonic()
+   if remaining<=0:return
+   time.sleep(min(.03,remaining))
  def back(self,gen):
-  self.validate_path(self.trail)
-  for unit in reversed(path_units(self.trail)):
-   self.wait_ready(gen);self.run_unit(unit,gen,True,False)
-   with self.lock:del self.trail[-len(unit):]
-  self.log('Home raggiunta secondo il conteggio impulsi. Pinza mantenuta.')
+  # HOME is an explicit direct target. Old jogs/deleted poses are never replayed here.
+  self.follow_position([0.]*AXES,gen)
+  self.trail.clear();self.log('HOME raggiunta secondo il conteggio impulsi; transizione diretta, pinza mantenuta.')
  def follow_path(self,path,gen):
   self.validate_path(self.trail);self.validate_path(path)
   previous=path_units(self.trail);following=path_units(path);common=0
@@ -374,27 +500,16 @@ class Controller:
   if grip not in ('apri','chiudi','non comandata') or type(enabled)!=bool:raise ValueError('Stato pinza o abilitazione non validi.')
   result=json.loads(json.dumps(pose));target=[round(v,2) for v in pos];result['pos']=target
   if target!=pose['pos']+[0.]*(AXES-len(pose['pos'])):
-   # Keep the taught route as an anchor. Repeated edits replace only its extension.
-   base=pose.get('edit_base_path',pose['path']);p=[0.0]*AXES
-   for step in base:p[step['axis']]+=step['delta']
-   path=json.loads(json.dumps(base))
-   for axis,value in enumerate(target):
-    delta=round(value-p[axis],2)
-    while abs(delta)>.001:
-     part=max(-360.0,min(360.0,delta));path.append(dict(axis=axis,delta=part));delta=round(delta-part,2)
-   if len(path)>4000:raise ValueError('Percorso troppo lungo: registra una nuova posa.')
-   result.update(pos=target,path=path,edit_base_path=base,angles_edited=path!=base)
+   result['path']=[edge for unit in direct_units([0.]*AXES,target) for edge in unit]
+   result.pop('edit_base_path',None);result['angles_edited']=True
   result.update(name=name.strip(),dwell=dwell,grip=grip,enabled=enabled)
   return result
  def validate_pose(self,pose):
-  self.validate_path(pose['path'])
   if not pose.get('enabled',True):raise ValueError('Posa disabilitata.')
   if pose.get('mode')!=self.mode:raise ValueError('Posa appartenente a una modalità diversa.')
-  p=[0.]*AXES
-  for step in pose['path']:
-   p[step['axis']]+=step['delta']
-   if not self.limits[step['axis']][0]<=p[step['axis']]<=self.limits[step['axis']][1]:raise ValueError('Posa fuori dai limiti attuali.')
-  if len(pose['pos'])!=AXES or any(abs(a-b)>.02 for a,b in zip(p,pose['pos'])):raise ValueError('Posa e percorso non coerenti.')
+  target=pose.get('pos');direct_units([0.]*AXES,target)
+  if any(not lo<=value<=hi for value,(lo,hi) in zip(target,self.limits)):raise ValueError('Posa fuori dai limiti attuali.')
+  if any(abs(value-self.pos[i])>.005 and not self.axes_enabled[i] for i,value in enumerate(target)):raise ValueError('La posa richiede un giunto disabilitato.')
   if pose.get('grip','non comandata') not in ('apri','chiudi','non comandata'):raise ValueError('Pinza non valida.')
   if type(pose.get('dwell')) not in (int,float) or not math.isfinite(pose['dwell']) or not 0<=pose['dwell']<=60:raise ValueError('Pausa posa non valida.')
  def voice_context(self):
@@ -423,8 +538,8 @@ class Controller:
     summary=('Move ' if english else 'Muovo ')+('; '.join(phrases))+'?'
    else:
     if not 0<=command['index']<len(self.sequence):raise ValueError('Posa non presente.')
-    self.validate_pose(self.sequence[command['index']]);self.validate_path(self.trail)
-    summary=('Run pose %d, %s, including its taught path and gripper action?' if english else 'Avvio posa %d, %s, incluso il percorso registrato e il comando pinza?')%(command['index']+1,self.sequence[command['index']]['name'])
+    self.validate_pose(self.sequence[command['index']]);self.target_units(self.sequence[command['index']]['pos'])
+    summary=('Move directly to pose %d, %s, including its gripper action?' if english else 'Raggiungo direttamente la posa %d, %s, incluso il comando pinza?')%(command['index']+1,self.sequence[command['index']]['name'])
    token=secrets.token_urlsafe(24)
    self.pending_voice=dict(token=token,command=command,context=self.voice_context(),expires=time.monotonic()+30)
    return dict(token=token,summary=summary,text=text)
@@ -482,37 +597,29 @@ class Controller:
    if op=='pause':self.paused=not self.paused;return
    if op=='end_cycle':
     if not self.playing:raise ValueError('Nessuna sequenza in riproduzione')
-    self.repeat_cycle=False;self.paused=False;self.log('Ultimo ciclo: rientro a HOME al termine.');return
+    self.repeat_cycle=False;self.paused=False
+    if b.get('return_home') is True:self.sequence_return_home=True
+    self.log('Ultimo ciclo: arresto al termine secondo la scelta del ritorno HOME.');return
    if op=='disconnect':
     if self.busy or self.playing:raise ValueError('Ferma prima il movimento.')
+    self.operator_collision_checks=True
     if self.connected:self.halt('Controllo scollegato: HOME da ristabilire.')
-    if self.fd is not None:os.close(self.fd);self.fd=None
+    if self.fd is not None:serial_transport.close(self.fd);self.fd=None
     self.connected=False;self.home=False;self.identified=False;self.speed_confirmed=False
     return
    if op=='connect':
     if b.get('mode')=='robot' and os.environ.get('DOC_REGIA_NO_HARDWARE')=='1':raise ValueError('Questa anteprima isolata non può aprire la USB del robot.')
     if self.busy or self.playing:raise ValueError('Ferma prima il movimento')
-    if self.fd is not None:os.close(self.fd);self.fd=None
+    self.operator_collision_checks=True
+    if self.fd is not None:serial_transport.close(self.fd);self.fd=None
     self.multi_axis=False;self.axis_control=False;self.drive_caps=[False]*AXES;self.drive_state=[None]*AXES;self.pending_off.clear();self.preparing_axis=None
     self.connected=False;self.home=False;self.trail=[];self.pos=[0.0]*AXES;self.error='';self.limits=[[0.0,0.0] for _ in range(AXES)];self.grip='non comandata'
     self.max_speed=min(20.0 if b.get('mode','demo')=='demo' else 10.0,self.profile_speed_limit);self.awaiting_halt=False;self.serial_lines=0;self.last_serial='';self.mode=b.get('mode','demo');self.reported_axes=5;self.identified=False;self.rx=b'';self.firmware='';self.speed=min(5.0,self.max_speed);self.requested_speed=self.speed;self.firmware_profile='';self.speed_confirmed=False;self.connected_at=time.monotonic();self.boot_ready_at=self.connected_at+USB_BOOT_QUIET;self.last_hello=self.connected_at-HELLO_RETRY
     if self.mode=='robot':
      port=b['port']
-     if port not in glob.glob('/dev/cu.usbmodem*')+glob.glob('/dev/cu.usbserial*'):raise ValueError('Porta USB non valida')
+     if port not in serial_transport.candidate_ports():raise ValueError('Porta USB non valida')
      ensure_port_available(port)
-     self.fd=os.open(port,os.O_RDWR|os.O_NOCTTY|os.O_NONBLOCK)
-     try:
-      claim_exclusive(self.fd)
-      ensure_port_available(port)
-     except Exception:
-      os.close(self.fd);self.fd=None;raise
-     attr=termios.tcgetattr(self.fd);attr[0]=0;attr[1]=0;attr[2]=termios.CS8|termios.CREAD|termios.CLOCAL;attr[3]=0;attr[4]=attr[5]=termios.B115200;attr[6][termios.VMIN]=0;attr[6][termios.VTIME]=0
-     try:
-      termios.tcsetattr(self.fd,termios.TCSANOW,attr)
-      # Restore modem-control lines after avrdude; no ARM or motion command.
-      fcntl.ioctl(self.fd,termios.TIOCMBIS,struct.pack('I',termios.TIOCM_DTR|termios.TIOCM_RTS))
-     except OSError:
-      os.close(self.fd);self.fd=None;raise
+     self.fd=serial_transport.open_port(port)
      self.log('USB configurata: 115200 baud · 8N1 · DTR/RTS attivi; attendo identificazione.')
      self.connected=True
      # handshake is asynchronous; home is refused until the version is recognized
@@ -579,9 +686,10 @@ class Controller:
    if op=='pose_start':
     index=b.get('index')
     if type(index)!=int or not 0<=index<len(self.sequence):raise ValueError('Posa non presente.')
-    pose=json.loads(json.dumps(self.sequence[index]));self.validate_pose(pose);self.validate_path(self.trail)
+    pose=json.loads(json.dumps(self.sequence[index]));self.validate_pose(pose);self.target_units(pose['pos'])
+    if self.preflight:self.preflight('pose',index=index,return_home=False)
     def run_pose(g):
-     self.follow_path(pose['path'],g)
+     self.follow_position(pose['pos'],g)
      if pose.get('grip') in ('apri','chiudi'):self.servo(pose['grip'],g)
      end=time.monotonic()+pose['dwell']
      while time.monotonic()<end:
@@ -605,24 +713,30 @@ class Controller:
     if grip=='auto':grip=self.grip
     if grip not in ('apri','chiudi','non comandata'):raise ValueError('Stato pinza non valido')
     self.sequence_undo=None
-    self.sequence.append(dict(name=name,mode=self.mode,pos=self.pos[:],path=[x.copy() for x in self.trail],grip=grip,dwell=dwell,enabled=True))
+    self.sequence.append(dict(name=name,mode=self.mode,pos=self.pos[:],path=[x for unit in direct_units([0.]*AXES,self.pos) for x in unit],grip=grip,dwell=dwell,enabled=True))
     self.save();return
    if op=='clear':self.sequence_undo=json.loads(json.dumps(self.sequence));self.sequence=[];self.save();return
-   if op=='home':self.validate_path(self.trail);self.spawn(self.back);return
+   if op=='home':
+    if 'context' in b and b['context']!=self.group_context():raise ValueError('Stato cambiato: controlla di nuovo il ritorno HOME.')
+    self.target_units([0.]*AXES)
+    if self.preflight:self.preflight('home',return_home=False)
+    self.spawn(self.back);return
    if op=='play':
     active=[pose for pose in self.sequence if pose.get('enabled',True)]
     if not active:raise ValueError('Abilita almeno una posa per riprodurre la sequenza.')
-    if self.trail or any(abs(x)>.01 for x in self.pos):raise ValueError('Torna a home prima della riproduzione')
-    # Validate every stored path before starting; reordered transitions reuse its edges.
+    if 'context' in b and b['context']!=self.group_context():raise ValueError('Sequenza o stato cambiati: controlla di nuovo il piano.')
+    return_home=b.get('return_home',False)
+    if type(return_home)!=bool:raise ValueError('Scelta del ritorno HOME non valida.')
+    motion=self.require_sequence_motion()
+    previous=self.pos[:]
     for pose in active:
-     self.validate_path(pose['path'])
-     if pose.get('mode')!=self.mode:raise ValueError('Registra le pose nella modalità corrente: le anteprime non sono percorsi provati sul robot.')
-     p=[0.0]*AXES
-     for x in pose['path']:
-      p[x['axis']]+=x['delta']
-      if not self.limits[x['axis']][0]-.001<=p[x['axis']]<=self.limits[x['axis']][1]+.001:raise ValueError('Sequenza fuori dai limiti attuali')
-     if any(abs(a-b)>.02 for a,b in zip(p,pose['pos'])):raise ValueError('Posa e percorso non coerenti')
-     if pose.get('grip','non comandata') not in ('apri','chiudi','non comandata'):raise ValueError('Stato pinza della posa non valido')
+     self.validate_pose(pose)
+     self.validate_target_units((unit for unit,_ in sequence_units(previous,pose['pos'],motion)),previous)
+     previous=pose['pos'][:]
+    if return_home:
+     self.validate_target_units((unit for unit,_ in sequence_units(previous,[0.]*AXES,motion)),previous)
+    if self.preflight:self.preflight('sequence',repeat=bool(b.get('repeat',False)),return_home=return_home)
+    self.sequence_return_home=return_home
     self.playing=True;self.paused=False;self.repeat_cycle=bool(b.get('repeat',False));sequence=json.loads(json.dumps(active))
     def play(g):
      while True:
@@ -632,37 +746,33 @@ class Controller:
        time.sleep(.05)
       time.sleep(.1)
       for pose in sequence:
-       self.follow_path(pose['path'],g)
+       self.follow_sequence_position(pose['pos'],g,motion)
        if pose.get('grip') in ('apri','chiudi'):self.servo(pose['grip'],g)
        self.log('Posa: '+pose['name']);end=time.monotonic()+pose['dwell']
        while time.monotonic()<end:
         if g!=self.generation:raise ValueError('Interrotto')
         time.sleep(.05)
-      self.back(g);self.cycle+=1;self.log('Ciclo completato: '+str(self.cycle))
+      if self.sequence_return_home:
+       if motion['mode']=='ordered':
+        if self.preflight:self.preflight('home',return_home=False,motion=motion)
+        self.follow_sequence_position([0.]*AXES,g,motion)
+        self.log('HOME raggiunta in ordine di sequenza secondo il conteggio impulsi.')
+       else:
+        if self.preflight:self.preflight('home',return_home=False)
+        self.back(g)
+      self.cycle+=1;self.log('Ciclo completato: '+str(self.cycle)+(' · HOME' if self.sequence_return_home else ' · ultima posa mantenuta'))
       if not self.repeat_cycle:break
     self.spawn(play);return
    raise ValueError('Azione sconosciuta')
  def check_connection(self):
   if not self.connected:raise ValueError('Connetti prima la modalità scelta')
  def save(self):
+  self.ensure_pose_ids()
+  path=DATA/'sequenza.json';tmp=DATA/'sequenza.tmp'
+  saved=dict(sequence=self.sequence,limits=self.limits,motion=self.sequence_motion)
+  if self.sequence_motion is None:
+   # Keep an invalid saved profile blocked across launches until replaced explicitly.
+   saved['motion']={}
+  tmp.write_text(json.dumps(saved,ensure_ascii=False,indent=2));tmp.replace(path)
   self.sequence_revision+=1
-  path=DATA/'sequenza.json';tmp=DATA/'sequenza.tmp';tmp.write_text(json.dumps(dict(sequence=self.sequence,limits=self.limits),ensure_ascii=False,indent=2));tmp.replace(path)
 c=Controller()
-class Handler(BaseHTTPRequestHandler):
- def log_message(self,*args):pass
- def send(self,code,data,kind='application/json'):
-  raw=data if isinstance(data,bytes) else json.dumps(data).encode();self.send_response(code);self.send_header('Content-Type',kind);self.send_header('Cache-Control','no-store');self.end_headers();self.wfile.write(raw)
- def do_GET(self):
-  if self.path=='/api/state':self.send(200,c.state())
-  elif self.path=='/':self.send(200,(ROOT/'index.html').read_bytes().replace(b'__TOKEN__',TOKEN.encode()),'text/html; charset=utf-8')
-  else:self.send(404,{'error':'Not found'})
- def do_POST(self):
-  if self.headers.get('X-Token')!=TOKEN:self.send(403,{'error':'Sessione non valida'});return
-  try:
-   n=int(self.headers.get('Content-Length',0))
-   if n>20000:raise ValueError('Richiesta troppo grande')
-   c.action(json.loads(self.rfile.read(n)));self.send(200,{'ok':True})
-  except Exception as e:self.send(400,{'error':str(e)})
-if __name__=='__main__':
- print('DOC Regia: http://127.0.0.1:8768',flush=True)
- ThreadingHTTPServer(('127.0.0.1',8768),Handler).serve_forever()
